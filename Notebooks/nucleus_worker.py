@@ -32,14 +32,13 @@ def process_single_nucleus(args):
     # Initialize containers that will store the results for this nucleus
     foci_data_list = []       # Stores per-foci measurements
     nuclei_data_list = []     # Stores nucleus-level metrics
-    parameter_results = []    # Stores results for each parameter iteration
 
     # Create mask for the current nucleus only (True where current cell label matches)
     masks_reduced = (masks == cellnumber)
     
     # Safety check – skip if the mask is empty (shouldn’t happen but prevents crashes)
     if not np.any(masks_reduced):
-        return [], [], []
+        return [], []
 
     # Copy the TRITC image and convert to float to ensure consistent pixel intensity scaling
     isolated_TRITC = img_as_float(TRITC_pic.copy())
@@ -48,7 +47,7 @@ def process_single_nucleus(args):
     
     # Skip processing if there is no fluorescence signal in this nucleus
     if isolated_TRITC.max() == 0:
-        return [], [], []
+        return [], []
 
     # Apply Difference of Gaussians filter (enhances small bright spots like foci)
     filtered_TRITC = filters.difference_of_gaussians(isolated_TRITC, low_sigma=1, high_sigma=2)
@@ -65,7 +64,7 @@ def process_single_nucleus(args):
     # Get all positive pixel values to determine brightness thresholds
     pos_pixels = TRITC_pic[TRITC_pic > 0]
     if pos_pixels.size == 0:
-        return [], [], []
+        return [], []
 
     # Compute the global brightness threshold for each parameter iteration
     min_brightness_per_param = np.percentile(pos_pixels, percentile_vals)
@@ -79,7 +78,7 @@ def process_single_nucleus(args):
 
     # Skip nucleus if no foci candidates were detected
     if candidates_filtered.shape[0] == 0 or candidates_unfiltered.shape[0] == 0:
-        return [], [], []
+        return [], []
 
     # Convert candidate coordinate arrays to integer form and extract intensity values
     # This is also done to save computing time, like this the program has to only check the values inside the vector instead of 
@@ -206,8 +205,7 @@ def process_single_nucleus(args):
 
 
     # Iterate through all valid parameter combinations
-    #for p_idx in range(len(valid_param_samples)):
-    for p_idx in range(1):
+    for p_idx in range(len(valid_param_samples)):
         # Apply filtering for this parameter iteration
         confirmed_coords, count = apply_foci_filters(
             p_idx,
@@ -231,17 +229,10 @@ def process_single_nucleus(args):
         for coord in confirmed_coords:
             all_detected_foci.append(tuple(coord)) # Location of foci
 
-        parameter_results.append({
-            "cell_num": cellnumber,
-            "bright_pct": bright_pct,
-            "contrast_thresh": contrast_thresh,
-            "percentile_val": percentile_val,
-            "foci_count": len(confirmed_coords)
-        })
 
     # Skip if no foci were found under any parameter combination
     if not foci_counts:
-        return [], [], []
+        return [], []
 
     # Compute statistics for this nucleus across all tested parameters
     mean_foci = np.mean(foci_counts)
@@ -294,7 +285,7 @@ def process_single_nucleus(args):
 
     # Compute distance transform and gradient for watershed segmentation
     markers_expanded = markers.copy()
-    distance = ndi.distance_transform_edt(filtered_TRITC < water_threshold)
+    distance = ndi.distance_transform_edt(filtered_TRITC < water_threshold) # Not used for now
     gradient = filters.sobel(filtered_TRITC) # Detects ridges(intensity changes) that are then used in the watershed segmentation
 
     # watershed_mask restricts the watershed algorithm to areas that are bright enough
@@ -314,7 +305,10 @@ def process_single_nucleus(args):
         spot_intensity = np.sum(isolated_TRITC[spot_mask])
 
         focus_tuple = (y, x)
-        times_detected = foci_detection_count.get(focus_tuple, 1)
+        times_detected = foci_detection_count.get(focus_tuple, 0)
+        if times_detected == 0:
+            print(f"Warning: Focus at {focus_tuple} not found in detection count - this shouldn't happen!")
+            times_detected = 1  # Must have been detected at least once (in best params)
         detection_probability = (times_detected / total_iterations) * 100
 
         foci_data_list.append({
@@ -345,4 +339,4 @@ def process_single_nucleus(args):
             'Position': position_number
         })
 
-    return foci_data_list, nuclei_data_list, parameter_results
+    return foci_data_list, nuclei_data_list
