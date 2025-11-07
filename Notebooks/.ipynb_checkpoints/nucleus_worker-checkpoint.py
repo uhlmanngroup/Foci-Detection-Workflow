@@ -125,58 +125,108 @@ def process_single_nucleus(args):
     foci_counts = []        # List storing number of foci detected per parameter set
     all_detected_foci = []  # Collects coordinates of all confirmed foci
 
-    # Iterate through all valid parameter combinations
-    for p_idx in range(len(valid_param_samples)):
+    # Function to filter out all the potential foci that don't match the set requirments(not bright enough, not brighter than 
+    # background, too far apart in both pictures etc.)
+    def apply_foci_filters(
+        p_idx,
+        bright_pcts,
+        contrast_threshs,
+        percentile_vals,
+        min_brightness_per_param,
+        bright_to_idx,
+        unf_intensities,
+        filt_intensities,
+        local_percentiles_unf,
+        local_percentiles_filt,
+        distances,
+        unf_yx,
+        tolerance,
+    ):
+        """
+        Applies all absolute and contrast-based filtering steps for one parameter iteration.
+        Returns:
+            confirmed_coords (np.ndarray): Coordinates of foci that passed all filters
+            foci_count (int): Total number of confirmed foci for this parameter set
+        """
+    
         # Saves the parameters for this iteration
-        bright_pct = bright_pcts[p_idx] # Background brightness percentage
-        contrast_thresh = contrast_threshs[p_idx] # Contrast threshold
-        percentile_val = percentile_vals[p_idx] # minimal brightness percentage
-        min_brightness = min_brightness_per_param[p_idx] # actual pxel intensity corresponding to the minimal brightness percentage
-
-        # Identify corresponding background brightness percentile column in the previously created bright_to_idxto get the actual 
-        # pixel background brightness for this iteration
+        bright_pct = bright_pcts[p_idx]            # Background brightness percentage
+        contrast_thresh = contrast_threshs[p_idx]  # Contrast threshold
+        percentile_val = percentile_vals[p_idx]    # Minimal brightness percentile
+        min_brightness = min_brightness_per_param[p_idx]  # Actual pixel intensity corresponding to that percentile
+    
+        # Identify corresponding background brightness percentile column in the previously created bright_to_idx
+        # to get the actual pixel background brightness for this iteration
         bright_key = np.round(bright_pct, 6)
         b_idx = bright_to_idx[bright_key]
-
+    
         # Apply absolute and contrast-based filters to candidate foci
         # Potential foci that have been previously identified with the smallest minimal brightness now need to be brighter than the 
-        # minimal brightness for this iteration(for both the filtered and unfiltered picture)
+        # minimal brightness for this iteration (for both the filtered and unfiltered picture)
         unf_mask_by_abs = unf_intensities >= min_brightness
         filt_mask_by_abs = filt_intensities >= min_brightness
-        # If no foci make the cut, the value 0 is saved as foci count
+    
+        # If no foci make the cut, return empty arrays and a foci count of 0
         if not np.any(unf_mask_by_abs) or not np.any(filt_mask_by_abs):
-            foci_counts.append(0)
-            continue
-
+            return np.array([]), 0
+    
         # Compare each focus’ brightness to its local background * contrast threshold
-        unf_local_bg = local_percentiles_unf[:, b_idx] # Accessing the previously saved background brightness value
+        unf_local_bg = local_percentiles_unf[:, b_idx]  # Accessing the previously saved background brightness value
         filt_local_bg = local_percentiles_filt[:, b_idx]
-        # filtering the foci that aren't significantly brighter than the chosen background
-        unf_mask_by_contrast = unf_intensities > (unf_local_bg * contrast_thresh) 
+    
+        # Filtering the foci that aren't significantly brighter than the chosen background
+        unf_mask_by_contrast = unf_intensities > (unf_local_bg * contrast_thresh)
         filt_mask_by_contrast = filt_intensities > (filt_local_bg * contrast_thresh)
         
         # Combine both absolute and contrast filters that were independently tested
         unf_final_mask = unf_mask_by_abs & unf_mask_by_contrast
         filt_final_mask = filt_mask_by_abs & filt_mask_by_contrast
-
+    
         # Get the indices of all the foci that passed all the checks
         unf_idxs = np.where(unf_final_mask)[0]
         filt_idxs = np.where(filt_final_mask)[0]
-        # If no foci remain after all the checks, add a 0 for the foci counts
+    
+        # If no foci remain after all the checks, return empty arrays and a foci count of 0
         if unf_idxs.size == 0 or filt_idxs.size == 0:
-            foci_counts.append(0)
-            continue
-
+            return np.array([]), 0
+    
         # Match filtered and unfiltered foci based on spatial proximity
-        distances_sub = distances[unf_idxs][:, filt_idxs] # Extracts submatrix that only includes the distances from foci that passed
-        # all the checks
-        nearest_dist = np.min(distances_sub, axis=1) # finding the closest two foci to each other (gives a 1D array where each 
-        # unfiltered focus islisted with the distance to the nearest unfiltered focus)
-        confirmed_unf_idxs = unf_idxs[nearest_dist <= tolerance] # Keeping only the unfiltered foci within tolerance in this 1D array
-        confirmed_coords = unf_yx[confirmed_unf_idxs] # Get the coordinates of the remaining foci
+        # Extracts submatrix that only includes the distances from foci that passed all the checks
+        distances_sub = distances[unf_idxs][:, filt_idxs]
+        # Finding the closest two foci to each other (gives a 1D array where each unfiltered focus is listed 
+        # with the distance to the nearest filtered focus)
+        nearest_dist = np.min(distances_sub, axis=1)
+        # Keeping only the unfiltered foci within the tolerance distance
+        confirmed_unf_idxs = unf_idxs[nearest_dist <= tolerance]
+        # Get the coordinates of the remaining foci
+        confirmed_coords = unf_yx[confirmed_unf_idxs]
+    
+        # Return coordinates and the total number of confirmed foci for this parameter iteration
+        return confirmed_coords, len(confirmed_coords)
+
+
+    # Iterate through all valid parameter combinations
+    for p_idx in range(len(valid_param_samples)):
+        # Apply filtering for this parameter iteration
+        confirmed_coords, count = apply_foci_filters(
+            p_idx,
+            bright_pcts,
+            contrast_threshs,
+            percentile_vals,
+            min_brightness_per_param,
+            bright_to_idx,
+            unf_intensities,
+            filt_intensities,
+            local_percentiles_unf,
+            local_percentiles_filt,
+            distances,
+            unf_yx,
+            tolerance,
+        )
+
 
         # Save total number of confirmed foci for this parameter iteration
-        foci_counts.append(len(confirmed_coords)) # total foci count
+        foci_counts.append(count) # total foci count
         for coord in confirmed_coords:
             all_detected_foci.append(tuple(coord)) # Location of foci
 
@@ -213,6 +263,23 @@ def process_single_nucleus(args):
     distances = cdist(coordinates_unfiltered, coordinates_filtered)
     tolerance = 2
     final_coordinates = coordinates_unfiltered[np.min(distances, axis=1) <= tolerance] if coordinates_unfiltered.size > 0 and coordinates_filtered.size > 0 else np.array([]).reshape(0, 2)
+
+    confirmed_coords, count = apply_foci_filters(
+        best_params,
+        bright_pct,
+        contrast_thresh,
+        percentile_val,
+        min_brightness,
+        bright_to_idx,
+        unf_intensities,
+        filt_intensities,
+        local_percentiles_unf,
+        local_percentiles_filt,
+        distances,
+        unf_yx,
+        tolerance,
+    )
+
 
     # Generate final markers for watershed segmentation
     coordinates = final_coordinates
