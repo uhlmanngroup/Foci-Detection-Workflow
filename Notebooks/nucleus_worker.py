@@ -206,7 +206,8 @@ def process_single_nucleus(args):
 
 
     # Iterate through all valid parameter combinations
-    for p_idx in range(len(valid_param_samples)):
+    #for p_idx in range(len(valid_param_samples)):
+    for p_idx in range(1):
         # Apply filtering for this parameter iteration
         confirmed_coords, count = apply_foci_filters(
             p_idx,
@@ -223,7 +224,7 @@ def process_single_nucleus(args):
             unf_yx,
             tolerance,
         )
-
+        print("parameter combination done: "+str(p_idx))
 
         # Save total number of confirmed foci for this parameter iteration
         foci_counts.append(count) # total foci count
@@ -264,20 +265,20 @@ def process_single_nucleus(args):
     tolerance = 2
     final_coordinates = coordinates_unfiltered[np.min(distances, axis=1) <= tolerance] if coordinates_unfiltered.size > 0 and coordinates_filtered.size > 0 else np.array([]).reshape(0, 2)
 
-    confirmed_coords, count = apply_foci_filters(
-        best_params,
-        bright_pct,
-        contrast_thresh,
-        percentile_val,
-        min_brightness,
-        bright_to_idx,
-        unf_intensities,
-        filt_intensities,
-        local_percentiles_unf,
-        local_percentiles_filt,
-        distances,
-        unf_yx,
-        tolerance,
+    final_coordinates, count = apply_foci_filters(
+        max_foci_idx,                # index of the best parameter set
+        bright_pcts,             # all tested background percentiles
+        contrast_threshs,        # all tested contrast thresholds
+        percentile_vals,         # all tested global percentile thresholds
+        min_brightness_per_param,# per-parameter minimal brightness levels
+        bright_to_idx,           # mapping of unique brightness percentiles to column indices
+        unf_intensities,         # intensities of foci in the unfiltered image
+        filt_intensities,        # intensities of foci in the filtered image
+        local_percentiles_unf,   # local background levels around each unfiltered focus
+        local_percentiles_filt,  # local background levels around each filtered focus
+        distances,               # distance matrix between unfiltered and filtered foci
+        unf_yx,                  # coordinates of unfiltered foci
+        tolerance,               # maximum spatial distance for matching filtered/unfiltered foci
     )
 
 
