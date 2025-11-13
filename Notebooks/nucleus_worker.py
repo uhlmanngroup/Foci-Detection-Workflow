@@ -15,6 +15,14 @@ from collections import Counter
 # HELPER FUNCTIONS (module-level for multiprocessing)
 # ===============================================================
 
+def compute_circularity(area, perimeter):
+    """Calculate circularity factor: 4π * area / perimeter^2"""
+    if perimeter == 0:
+        return 0.0
+    return (4 * np.pi * area) / (perimeter ** 2)
+
+
+
 def compute_local_percentiles_for_candidates(image, coords, unique_percentiles):
     """Calculate local background percentiles around each candidate focus."""
     N = coords.shape[0]
@@ -88,7 +96,7 @@ def analyze_channel_intensity(nucleus_mask, image, channel_name):
         f"{channel_name}_total_intensity": total_intensity,
         f"{channel_name}_mean_intensity": mean_intensity,
     }
-
+    
 
 # ===============================================================
 # FOCI DETECTION FOR ONE CHANNEL
@@ -207,35 +215,66 @@ def detect_foci_single_channel(nucleus_mask, image, original_image, channel_name
     
     # Measure each focus
     foci_list = []
+    
+    # Set detection probability threshold for "confident" foci
+    # Adjust this value based on your needs (50-70% is typical)
+    DETECTION_THRESHOLD = 50.0  # Only include foci detected in ≥50% of iterations
+    
+    confident_foci_intensities = []  # For nucleus-level summary
+    
     for idx, (y, x) in enumerate(final_coords):
         region_id = water_labels[y, x]
         spot_mask = (water_labels == region_id)
         spot_area = int(np.sum(spot_mask))
         spot_intensity = float(np.sum(isolated_img[spot_mask]))
+        spot_mean_intensity = float(np.mean(isolated_img[spot_mask]))
         detection_prob = (foci_detection_count.get((y, x), 0) / total_iterations) * 100
+        
+        # Calculate circularity for this focus
+        focus_props = measure.regionprops(spot_mask.astype(int))
+        if len(focus_props) > 0:
+            focus_perimeter = focus_props[0].perimeter
+            focus_circularity = compute_circularity(spot_area, focus_perimeter)
+        else:
+            focus_circularity = 0.0
+        
+        # Track intensity for confident foci only (for nucleus summary)
+        if detection_prob >= DETECTION_THRESHOLD:
+            confident_foci_intensities.append(spot_intensity)
         
         foci_list.append({
             'cell_num': cell_id,
             'centr_y': int(y),
             'centr_x': int(x),
             'foci_area': spot_area,
-            'intensity': spot_intensity,
+            'foci_circularity': focus_circularity,
+            'foci_total_intensity': spot_intensity,
+            'foci_mean_intensity': spot_mean_intensity,
             'detection_prob': detection_prob,
             'channel': channel_name
         })
+    
+    # Calculate nucleus-level foci intensity statistics (ONLY from confident foci)
+    sum_foci_intensity = float(np.sum(confident_foci_intensities)) if confident_foci_intensities else 0.0
+    mean_foci_intensity = float(np.mean(confident_foci_intensities)) if confident_foci_intensities else 0.0
+    num_confident_foci = len(confident_foci_intensities)
     
     summary = {
         f"{channel_name}_mean_foci": mean_foci,
         f"{channel_name}_std_foci": std_foci,
         f"{channel_name}_min_foci": min_foci,
         f"{channel_name}_max_foci": max_foci,
+        f"{channel_name}_confident_foci_count": num_confident_foci,
+        f"{channel_name}_sum_foci_intensity": sum_foci_intensity,
+        f"{channel_name}_mean_foci_intensity": mean_foci_intensity,
     }
     
     return foci_list, summary
 
 
+
 # ===============================================================
-# MAIN WORKER FUNCTION (compatible with your task structure)
+# MAIN WORKER FUNCTION 
 # ===============================================================
 
 def process_single_nucleus(args):
@@ -272,16 +311,21 @@ def process_single_nucleus(args):
         'Position': position_number
     }
     
-    # Extract DAPI properties (nucleus shape/size)
+    # Extract DAPI properties (nucleus shape/size) - ENHANCED
     if 'DAPI' in channel_images:
         nucleus_props = measure.regionprops(masks_reduced.astype(int))
         if len(nucleus_props) > 0:
             region = nucleus_props[0]
+            nucleus_area = region.area
+            nucleus_perimeter = region.perimeter
+            nucleus_circularity = compute_circularity(nucleus_area, nucleus_perimeter)
+            
             nucleus_data.update({
-                'DAPI_area': region.area,
+                'DAPI_area': nucleus_area,
+                'DAPI_perimeter': nucleus_perimeter,
+                'DAPI_circularity': nucleus_circularity,
                 'centr_y': region.centroid[0],
                 'centr_x': region.centroid[1],
-                'perim': region.perimeter,
             })
     
     # Process each channel
@@ -293,8 +337,8 @@ def process_single_nucleus(args):
         intensity_data = analyze_channel_intensity(masks_reduced, channel_image_float, channel_name)
         nucleus_data.update(intensity_data)
         
-        # Detect foci (skip DAPI as it's just for nuclei segmentation)
-        if channel_name != "DAPI":
+        # Detect foci ONLY for TRITC and FITC (FIXED LOGIC!)
+        if channel_name in ["TRITC", "FITC"]:
             foci_list, foci_summary = detect_foci_single_channel(
                 masks_reduced, 
                 channel_image_float, 
