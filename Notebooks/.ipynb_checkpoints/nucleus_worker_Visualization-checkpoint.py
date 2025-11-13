@@ -1,6 +1,7 @@
 """
 Multi-channel nucleus analysis worker for parallel processing.
 Compatible with Windows multiprocessing and existing task structure.
+NOW RETURNS WATERSHED LABELS FOR GLOBAL VISUALIZATION
 """
 import numpy as np
 from skimage import exposure, filters, measure, img_as_float
@@ -18,6 +19,127 @@ import os
 # ===============================================================
 # HELPER FUNCTIONS (module-level for multiprocessing)
 # ===============================================================
+
+# ===============================================================
+# SAVE GLOBAL VISUALIZATION (INCLUDES REAL WATERSHED)
+# ===============================================================
+"""
+Enhanced visualization function for full-field foci and watershed overlays.
+Saves 4 separate images per position:
+1. TRITC foci on original image
+2. FITC foci on original image  
+3. TRITC watershed outlines (yellow)
+4. FITC watershed outlines (yellow)
+"""
+
+def save_global_visualizations(original_image, foci_tritc, foci_fitc, 
+                               watershed_labels_tritc, watershed_labels_fitc,
+                               well_number, position_number, base_name, output_root):
+    """
+    Generate 4 full-field visualizations with proper filenames.
+    
+    Parameters:
+    -----------
+    original_image : ndarray
+        Raw DAPI or merged channel image for background
+    foci_tritc : list of tuples
+        TRITC foci coordinates [(y, x), ...]
+    foci_fitc : list of tuples
+        FITC foci coordinates [(y, x), ...]
+    watershed_labels_tritc : ndarray
+        Labeled watershed segmentation for TRITC channel
+    watershed_labels_fitc : ndarray
+        Labeled watershed segmentation for FITC channel
+    well_number : str
+        Well identifier (e.g., '00044')
+    position_number : str
+        Position identifier (e.g., '00021')
+    base_name : str
+        Original filename base (e.g., 'ATR2_24h--W00044--P00021--Z00000--T00000--')
+    output_root : str
+        Root directory for saving images
+    """
+    import matplotlib.pyplot as plt
+    import os
+    from skimage import exposure
+    from skimage.segmentation import mark_boundaries
+
+    try:
+        debug_dir = os.path.join(output_root, "debug_images_global")
+        os.makedirs(debug_dir, exist_ok=True)
+
+        # Normalize image once for all visualizations
+        vis_img = exposure.rescale_intensity(original_image, in_range='image', out_range=(0, 1))
+
+        # --- 1️⃣ TRITC FOCI OVERLAY ---
+        plt.figure(figsize=(10, 10))
+        plt.imshow(vis_img, cmap='gray')
+        
+        for (y, x) in foci_tritc:
+            plt.plot(x, y, 'ro', markersize=0.3, alpha=1)
+        
+        plt.title(f"TRITC Foci | Well {well_number} Position {position_number}", fontsize=14)
+        plt.axis('off')
+        plt.tight_layout()
+        
+        filename = f"{base_name}TRITC_foci.png"
+        plt.savefig(os.path.join(debug_dir, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"✓ Saved TRITC foci visualization: {filename}")
+
+        # --- 2️⃣ FITC FOCI OVERLAY ---
+        plt.figure(figsize=(10, 10))
+        plt.imshow(vis_img, cmap='gray')
+        
+        for (y, x) in foci_fitc:
+            plt.plot(x, y, 'go', markersize=0.3, alpha=1)
+        
+        plt.title(f"FITC Foci | Well {well_number} Position {position_number}", fontsize=14)
+        plt.axis('off')
+        plt.tight_layout()
+        
+        filename = f"{base_name}FITC_foci.png"
+        plt.savefig(os.path.join(debug_dir, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"✓ Saved FITC foci visualization: {filename}")
+
+        # --- 3️⃣ TRITC WATERSHED OUTLINES ---
+        outlined_img_tritc = mark_boundaries(vis_img, watershed_labels_tritc, 
+                                            color=(1, 1, 0), mode='thick')
+        plt.figure(figsize=(10, 10))
+        plt.imshow(outlined_img_tritc)
+        plt.title(f"TRITC Watershed | Well {well_number} Position {position_number}", fontsize=14)
+        plt.axis('off')
+        plt.tight_layout()
+        
+        filename = f"{base_name}TRITC_watershed.png"
+        plt.savefig(os.path.join(debug_dir, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"✓ Saved TRITC watershed visualization: {filename}")
+
+        # --- 4️⃣ FITC WATERSHED OUTLINES ---
+        outlined_img_fitc = mark_boundaries(vis_img, watershed_labels_fitc, 
+                                           color=(1, 1, 0), mode='thick')
+        plt.figure(figsize=(10, 10))
+        plt.imshow(outlined_img_fitc)
+        plt.title(f"FITC Watershed | Well {well_number} Position {position_number}", fontsize=14)
+        plt.axis('off')
+        plt.tight_layout()
+        
+        filename = f"{base_name}FITC_watershed.png"
+        plt.savefig(os.path.join(debug_dir, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"✓ Saved FITC watershed visualization: {filename}")
+
+    except Exception as e:
+        print(f"⚠️ Failed to save global visualizations for Well {well_number}, Position {position_number}: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+
+
+
 
 def save_debug_image(isolated_img, water_labels, final_coords, foci_detection_count,
                      total_iterations, cellnumber, channel_name, well_number, position_number,
@@ -52,53 +174,6 @@ def save_debug_image(isolated_img, water_labels, final_coords, foci_detection_co
 
     except Exception as e:
         print(f"⚠️ Debug image save failed for cell {cellnumber} ({channel_name}): {e}")
-
-
-
-def save_global_visualizations(original_image, foci_tritc, foci_fitc, nucleus_mask,
-                               well_number, position_number, output_root):
-    """
-    Generate two full-image debug visualizations:
-    1. All foci (TRITC + FITC) on original image
-    2. Watershed / nucleus outlines for orientation
-    """
-    try:
-        debug_dir = os.path.join(output_root, "debug_images_global")
-        os.makedirs(debug_dir, exist_ok=True)
-
-        # --- 1. Full image with all foci ---
-        plt.figure(figsize=(8, 8))
-        vis_img = exposure.rescale_intensity(original_image, in_range='image', out_range=(0, 1))
-        plt.imshow(vis_img, cmap='gray')
-
-        # TRITC foci = red, FITC foci = green
-        for (y, x) in foci_tritc:
-            plt.plot(x, y, 'ro', markersize=2)
-        for (y, x) in foci_fitc:
-            plt.plot(x, y, 'go', markersize=2)
-
-        plt.title(f"All Foci | W{well_number} P{position_number}")
-        plt.axis('off')
-        plt.tight_layout()
-        plt.savefig(os.path.join(debug_dir, f"W{well_number}_P{position_number}_AllFoci.png"), dpi=200)
-        plt.close()
-
-        # --- 2. Full image with nucleus outlines ---
-        plt.figure(figsize=(8, 8))
-        plt.imshow(vis_img, cmap='gray')
-        outlined_img = mark_boundaries(vis_img, measure.label(nucleus_mask), color=(1, 1, 0), mode='thick')
-        plt.imshow(outlined_img)
-        plt.title(f"Nucleus Outlines | W{well_number} P{position_number}")
-        plt.axis('off')
-        plt.tight_layout()
-        plt.savefig(os.path.join(debug_dir, f"W{well_number}_P{position_number}_NucleusOutlines.png"), dpi=200)
-        plt.close()
-
-    except Exception as e:
-        print(f"⚠️ Failed to save global visualization for W{well_number} P{position_number}: {e}")
-
-
-
 
 
 def compute_circularity(area, perimeter):
@@ -184,7 +259,7 @@ def analyze_channel_intensity(nucleus_mask, image, channel_name):
 
 
 # ===============================================================
-# FOCI DETECTION FOR ONE CHANNEL
+# FOCI DETECTION FOR ONE CHANNEL (MODIFIED TO RETURN WATERSHED)
 # ===============================================================
 
 def detect_foci_single_channel(
@@ -194,13 +269,15 @@ def detect_foci_single_channel(
 ):
     """
     Detect foci in a single nucleus region for one channel.
-    Returns: (foci_list, summary_dict)
+    Returns: (foci_list, summary_dict, watershed_labels)
+    
+    NEW: Now returns watershed_labels for global visualization
     """
     isolated_img = img_as_float(image.copy())
     isolated_img[~nucleus_mask] = 0
     
     if isolated_img.max() == 0:
-        return [], {}
+        return [], {}, None  # ← CHANGED: Added None for watershed
     
     # Apply DoG filter
     filtered_img = filters.difference_of_gaussians(isolated_img, low_sigma=1, high_sigma=2)
@@ -216,7 +293,7 @@ def detect_foci_single_channel(
     # Use original_image for global percentile calculations
     pos_pixels = original_image[original_image > 0]
     if pos_pixels.size == 0:
-        return [], {}
+        return [], {}, None  # ← CHANGED: Added None
     
     min_brightness_per_param = np.percentile(pos_pixels, percentile_vals)
     global_min_brightness = np.min(min_brightness_per_param)
@@ -228,7 +305,7 @@ def detect_foci_single_channel(
                                           threshold_abs=global_min_brightness)
     
     if len(candidates_filtered) == 0 or len(candidates_unfiltered) == 0:
-        return [], {}
+        return [], {}, None  # ← CHANGED: Added None
     
     # Extract coordinates and intensities
     filt_yx = np.asarray(candidates_filtered, dtype=int)
@@ -266,7 +343,7 @@ def detect_foci_single_channel(
             all_detected_foci.append(tuple(coord))
     
     if not foci_counts:
-        return [], {}
+        return [], {}, None  # ← CHANGED: Added None
     
     # Calculate statistics
     foci_detection_count = Counter(all_detected_foci)
@@ -275,7 +352,7 @@ def detect_foci_single_channel(
     min_foci = int(min(foci_counts))
     max_foci = int(max(foci_counts))
     
-    # Run watershed with best parameters - PROPERLY APPLY ALL FILTERS
+    # Run watershed with best parameters
     max_idx = np.argmax(foci_counts)
     best_params = valid_param_samples[max_idx]
     best_bright_pct = best_params[0]
@@ -292,7 +369,7 @@ def detect_foci_single_channel(
                                          threshold_abs=min_brightness)
     
     if coordinates_unfiltered.size == 0 or coordinates_filtered.size == 0:
-        return [], {}
+        return [], {}, None  # ← CHANGED: Added None
     
     # Extract intensities at peak locations
     unf_y, unf_x = coordinates_unfiltered[:, 0], coordinates_unfiltered[:, 1]
@@ -321,28 +398,22 @@ def detect_foci_single_channel(
     coordinates_filtered_filtered = coordinates_filtered[filt_final_mask]
     
     if coordinates_unfiltered_filtered.size == 0 or coordinates_filtered_filtered.size == 0:
-        return [], {}
+        return [], {}, None  # ← CHANGED: Added None
     
     # Match filtered and unfiltered with tolerance
     distances_final = cdist(coordinates_unfiltered_filtered, coordinates_filtered_filtered)
     final_coords = coordinates_unfiltered_filtered[np.min(distances_final, axis=1) <= tolerance]
     
     if len(final_coords) == 0:
-        return [], {}
+        return [], {}, None  # ← CHANGED: Added None
     
-    # Perform watershed segmentation on ORIGINAL isolated image, not DoG
-    # Use original image for better boundary detection
+    # Perform watershed segmentation
     gradient = filters.sobel(isolated_img)
     
     markers = np.zeros_like(isolated_img, dtype=int)
     for idx, (y, x) in enumerate(final_coords, start=1):
         markers[y, x] = idx
     
-    # CRITICAL FIX: Use a more restrictive watershed mask
-    # Only include pixels that are:
-    # 1. Above a higher threshold (e.g., 1.5x min_brightness)
-    # 2. Connected to a marker
-    # This prevents huge foci from weak boundaries
     watershed_threshold = min_brightness * 1.5
     watershed_mask = (isolated_img > watershed_threshold) | (markers > 0)
     
@@ -350,12 +421,8 @@ def detect_foci_single_channel(
     
     # Measure each focus
     foci_list = []
-    
-    # Set detection probability threshold for "confident" foci
-    # Adjust this value based on your needs (50-70% is typical)
-    DETECTION_THRESHOLD = 50.0  # Only include foci detected in ≥50% of iterations
-    
-    confident_foci_intensities = []  # For nucleus-level summary
+    DETECTION_THRESHOLD = 50.0
+    confident_foci_intensities = []
     
     for idx, (y, x) in enumerate(final_coords):
         region_id = water_labels[y, x]
@@ -373,13 +440,7 @@ def detect_foci_single_channel(
         else:
             focus_circularity = 0.0
         
-        # Calculate detection probability
-        detection_prob = (foci_detection_count.get((y, x), 0) / total_iterations) * 100
-        
-        # Only save foci that were detected in parameter testing
-        # This should now never be 0 since we're using properly filtered coordinates
         if detection_prob > 0:
-            # Track intensity for confident foci only (for nucleus summary)
             if detection_prob >= DETECTION_THRESHOLD:
                 confident_foci_intensities.append(spot_intensity)
             
@@ -395,7 +456,7 @@ def detect_foci_single_channel(
                 'channel': channel_name
             })
     
-    # Calculate nucleus-level foci intensity statistics (ONLY from confident foci)
+    # Calculate nucleus-level statistics
     sum_foci_intensity = float(np.sum(confident_foci_intensities)) if confident_foci_intensities else 0.0
     mean_foci_intensity = float(np.mean(confident_foci_intensities)) if confident_foci_intensities else 0.0
     num_confident_foci = len(confident_foci_intensities)
@@ -410,30 +471,20 @@ def detect_foci_single_channel(
         f"{channel_name}_mean_foci_intensity": mean_foci_intensity,
     }
 
-            
-    return foci_list, summary
+    # ← NEW: Return watershed labels for global visualization
+    return foci_list, summary, water_labels
 
 
 # ===============================================================
-# MAIN WORKER FUNCTION (compatible with your task structure)
+# MAIN WORKER FUNCTION (MODIFIED TO RETURN WATERSHED LABELS)
 # ===============================================================
 
 def process_single_nucleus(args):
     """
     Process one nucleus across all provided channels.
-    Compatible with existing task structure: (cellnum, masks, channel_dict, valid_param_samples, 
-                                             total_iterations, well_number, position_number)
     
-    Args:
-        tuple: (cellnumber, masks, channel_images_dict, valid_param_samples, 
-                total_iterations, well_number, position_number)
-        
-        channel_images_dict should be: {'TRITC': TRITC_pic, 'FITC': FITC_pic, 'Cy5': Cy5_pic, 'DAPI': DAPI_pic}
-    
-    Returns:
-        tuple: (foci_data_list, nuclei_data_list)
-            - foci_data_list: list of dicts with individual foci (includes 'channel' key)
-            - nuclei_data_list: list with single dict containing nucleus summary
+    NOW RETURNS: (foci_data_list, nuclei_data_list, watershed_data_list)
+    watershed_data_list contains dictionaries with watershed labels for each channel
     """
     (cellnumber, masks, channel_images, valid_param_samples, 
      total_iterations, well_number, position_number) = args
@@ -442,7 +493,7 @@ def process_single_nucleus(args):
     masks_reduced = (masks == cellnumber)
     
     if not np.any(masks_reduced):
-        return [], []
+        return [], [], []  # ← CHANGED: Added empty list for watershed
     
     # Initialize result containers
     foci_data_list = []
@@ -451,8 +502,9 @@ def process_single_nucleus(args):
         'Well': well_number,
         'Position': position_number
     }
+    watershed_data_list = []  # ← NEW: Store watershed labels here
     
-    # Extract DAPI properties (nucleus shape/size) - ENHANCED
+    # Extract DAPI properties (nucleus shape/size)
     if 'DAPI' in channel_images:
         nucleus_props = measure.regionprops(masks_reduced.astype(int))
         if len(nucleus_props) > 0:
@@ -471,21 +523,20 @@ def process_single_nucleus(args):
     
     # Process each channel
     for channel_name, channel_image in channel_images.items():
-        # Ensure image is float
         channel_image_float = img_as_float(channel_image)
         
         # Calculate intensity for all channels
         intensity_data = analyze_channel_intensity(masks_reduced, channel_image_float, channel_name)
         nucleus_data.update(intensity_data)
         
-        # Detect foci ONLY for TRITC and FITC (FIXED LOGIC!)
+        # Detect foci ONLY for TRITC and FITC
         if channel_name in ["TRITC", "FITC"]:
-            foci_list, foci_summary = detect_foci_single_channel(
+            foci_list, foci_summary, water_labels = detect_foci_single_channel(  # ← CHANGED: Now gets 3 returns
                 masks_reduced,
                 channel_image_float,
                 channel_image_float,
                 channel_name,
-                cellnumber,  # <-- this is your cell ID
+                cellnumber,
                 valid_param_samples,
                 total_iterations,
                 well_number,
@@ -499,97 +550,17 @@ def process_single_nucleus(args):
             
             foci_data_list.extend(foci_list)
             nucleus_data.update(foci_summary)
+            
+            # ← NEW: Store watershed labels if valid
+            if water_labels is not None:
+                watershed_data_list.append({
+                    'cell_id': cellnumber,
+                    'channel': channel_name,
+                    'labels': water_labels,
+                    'mask': masks_reduced  # Include the nucleus mask for proper placement
+                })
     
     nuclei_data_list = [nucleus_data]
-
-
     
-
-
-    return foci_data_list, nuclei_data_list
-
-
-# ===============================================================
-# SUMMARY OF TRACKED DATA
-# ===============================================================
-
-"""
-COMPLETE DATA TRACKING SUMMARY:
-================================
-
-NUCLEUS DICTIONARY (one row per nucleus):
------------------------------------------
-Identifiers:
-  - cell_num: Nucleus ID
-  - Well: Well number
-  - Position: Position number
-  - centr_y, centr_x: Nucleus centroid coordinates
-
-DAPI Channel (Nucleus morphology):
-  - DAPI_area: Nucleus area in pixels
-  - DAPI_perimeter: Nucleus perimeter in pixels
-  - DAPI_circularity: Shape factor (4π*area/perimeter²), 1.0 = perfect circle
-  - DAPI_total_intensity: Sum of all pixel intensities in nucleus
-  - DAPI_mean_intensity: Total intensity / nucleus area
-
-TRITC Channel (Signal + Foci):
-  - TRITC_total_intensity: Sum of all pixel intensities in nucleus
-  - TRITC_mean_intensity: Total intensity / nucleus area
-  - TRITC_sum_foci_intensity: Sum of intensities from CONFIDENT foci only (≥50% detection)
-  - TRITC_mean_foci_intensity: Average intensity per CONFIDENT focus
-  - TRITC_confident_foci_count: Number of foci passing detection threshold
-  - TRITC_mean_foci: Average number of foci across parameter iterations
-  - TRITC_std_foci: Standard deviation of foci counts
-  - TRITC_min_foci: Minimum foci detected across iterations
-  - TRITC_max_foci: Maximum foci detected across iterations
-
-FITC Channel (Signal + Foci):
-  - FITC_total_intensity: Sum of all pixel intensities in nucleus
-  - FITC_mean_intensity: Total intensity / nucleus area
-  - FITC_sum_foci_intensity: Sum of intensities from CONFIDENT foci only (≥50% detection)
-  - FITC_mean_foci_intensity: Average intensity per CONFIDENT focus
-  - FITC_confident_foci_count: Number of foci passing detection threshold
-  - FITC_mean_foci: Average number of foci across parameter iterations
-  - FITC_std_foci: Standard deviation of foci counts
-  - FITC_min_foci: Minimum foci detected
-  - FITC_max_foci: Maximum foci detected
-
-Cy5 Channel (Signal only, no foci detection):
-  - Cy5_total_intensity: Sum of all pixel intensities in nucleus
-  - Cy5_mean_intensity: Total intensity / nucleus area
-
-
-FOCI DICTIONARY (one row per focus):
-------------------------------------
-Identifiers:
-  - cell_num: Parent nucleus ID
-  - Well: Well number
-  - Position: Position number
-  - channel: Which channel (TRITC or FITC)
-  - centr_y, centr_x: Focus centroid coordinates
-
-Focus Properties (TRITC and FITC only):
-  - foci_area: Focus area in pixels
-  - foci_circularity: Shape factor (4π*area/perimeter²)
-  - foci_total_intensity: Sum of pixel intensities in this focus
-  - foci_mean_intensity: Average pixel intensity in this focus
-  - detection_prob: Percentage of parameter iterations that detected this focus (robustness metric)
-
-
-BIOLOGICAL INTERPRETATION:
-==========================
-- Nucleus circularity → Nuclear shape abnormalities
-- Total intensity → Overall signal in nucleus (background + foci)
-- Sum foci intensity → Signal from confident foci only (robust measurement)
-- Mean foci intensity → Average brightness per confident focus
-- Confident foci count → Number of foci passing detection threshold (≥50%)
-- Detection probability → Per-focus confidence (0-100%)
-- Mean/std foci count → Stability of count across parameter space
-
-NOTE: sum_foci_intensity and mean_foci_intensity use ONLY "confident" foci 
-(detection_prob ≥ 50%) to ensure robust measurements. All individual foci 
-are still saved with their detection_prob, allowing post-hoc threshold adjustment.
-
-To change the detection threshold, modify DETECTION_THRESHOLD in line 224 
-(default = 50.0). Typical values: 50-70%.
-"""
+    # ← CHANGED: Now returns 3 items instead of 2
+    return foci_data_list, nuclei_data_list, watershed_data_list
