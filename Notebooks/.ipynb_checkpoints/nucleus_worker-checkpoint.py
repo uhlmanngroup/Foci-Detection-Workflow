@@ -22,7 +22,6 @@ def compute_circularity(area, perimeter):
     return (4 * np.pi * area) / (perimeter ** 2)
 
 
-
 def compute_local_percentiles_for_candidates(image, coords, unique_percentiles):
     """Calculate local background percentiles around each candidate focus."""
     N = coords.shape[0]
@@ -96,7 +95,7 @@ def analyze_channel_intensity(nucleus_mask, image, channel_name):
         f"{channel_name}_total_intensity": total_intensity,
         f"{channel_name}_mean_intensity": mean_intensity,
     }
-    
+
 
 # ===============================================================
 # FOCI DETECTION FOR ONE CHANNEL
@@ -187,30 +186,77 @@ def detect_foci_single_channel(nucleus_mask, image, original_image, channel_name
     min_foci = int(min(foci_counts))
     max_foci = int(max(foci_counts))
     
-    # Run watershed with best parameters
+    # Run watershed with best parameters - PROPERLY APPLY ALL FILTERS
     max_idx = np.argmax(foci_counts)
     best_params = valid_param_samples[max_idx]
+    best_bright_pct = best_params[0]
+    best_contrast_thresh = best_params[1]
     percentile_val = best_params[2]
+    
+    # Calculate minimum brightness from original image
     min_brightness = np.percentile(original_image[original_image > 0], percentile_val)
     
+    # Find candidate peaks in both filtered and unfiltered
     coordinates_unfiltered = peak_local_max(isolated_img, min_distance=2, 
                                            threshold_abs=min_brightness)
     coordinates_filtered = peak_local_max(filtered_img, min_distance=2, 
                                          threshold_abs=min_brightness)
     
-    if coordinates_unfiltered.size > 0 and coordinates_filtered.size > 0:
-        distances_final = cdist(coordinates_unfiltered, coordinates_filtered)
-        final_coords = coordinates_unfiltered[np.min(distances_final, axis=1) <= tolerance]
-    else:
-        final_coords = np.empty((0, 2), int)
+    if coordinates_unfiltered.size == 0 or coordinates_filtered.size == 0:
+        return [], {}
     
-    # Perform watershed segmentation
-    gradient = filters.sobel(filtered_img)
-    markers = np.zeros_like(filtered_img, dtype=int)
+    # Extract intensities at peak locations
+    unf_y, unf_x = coordinates_unfiltered[:, 0], coordinates_unfiltered[:, 1]
+    filt_y, filt_x = coordinates_filtered[:, 0], coordinates_filtered[:, 1]
+    unf_peak_intensities = isolated_img[unf_y, unf_x]
+    filt_peak_intensities = filtered_img[filt_y, filt_x]
+    
+    # Apply ABSOLUTE brightness filter
+    unf_bright_mask = unf_peak_intensities >= min_brightness
+    filt_bright_mask = filt_peak_intensities >= min_brightness
+    
+    # Apply LOCAL BACKGROUND contrast filter
+    unf_local_bg = compute_local_percentiles_for_candidates(
+        isolated_img, coordinates_unfiltered, [best_bright_pct])[:, 0]
+    filt_local_bg = compute_local_percentiles_for_candidates(
+        filtered_img, coordinates_filtered, [best_bright_pct])[:, 0]
+    
+    unf_contrast_mask = unf_peak_intensities > (unf_local_bg * best_contrast_thresh)
+    filt_contrast_mask = filt_peak_intensities > (filt_local_bg * best_contrast_thresh)
+    
+    # Combine all filters
+    unf_final_mask = unf_bright_mask & unf_contrast_mask
+    filt_final_mask = filt_bright_mask & filt_contrast_mask
+    
+    coordinates_unfiltered_filtered = coordinates_unfiltered[unf_final_mask]
+    coordinates_filtered_filtered = coordinates_filtered[filt_final_mask]
+    
+    if coordinates_unfiltered_filtered.size == 0 or coordinates_filtered_filtered.size == 0:
+        return [], {}
+    
+    # Match filtered and unfiltered with tolerance
+    distances_final = cdist(coordinates_unfiltered_filtered, coordinates_filtered_filtered)
+    final_coords = coordinates_unfiltered_filtered[np.min(distances_final, axis=1) <= tolerance]
+    
+    if len(final_coords) == 0:
+        return [], {}
+    
+    # Perform watershed segmentation on ORIGINAL isolated image, not DoG
+    # Use original image for better boundary detection
+    gradient = filters.sobel(isolated_img)
+    
+    markers = np.zeros_like(isolated_img, dtype=int)
     for idx, (y, x) in enumerate(final_coords, start=1):
         markers[y, x] = idx
     
-    watershed_mask = (filtered_img > min_brightness) | (markers > 0)
+    # CRITICAL FIX: Use a more restrictive watershed mask
+    # Only include pixels that are:
+    # 1. Above a higher threshold (e.g., 1.5x min_brightness)
+    # 2. Connected to a marker
+    # This prevents huge foci from weak boundaries
+    watershed_threshold = min_brightness * 1.5
+    watershed_mask = (isolated_img > watershed_threshold) | (markers > 0)
+    
     water_labels = watershed(gradient, markers, mask=watershed_mask)
     
     # Measure each focus
@@ -238,21 +284,27 @@ def detect_foci_single_channel(nucleus_mask, image, original_image, channel_name
         else:
             focus_circularity = 0.0
         
-        # Track intensity for confident foci only (for nucleus summary)
-        if detection_prob >= DETECTION_THRESHOLD:
-            confident_foci_intensities.append(spot_intensity)
+        # Calculate detection probability
+        detection_prob = (foci_detection_count.get((y, x), 0) / total_iterations) * 100
         
-        foci_list.append({
-            'cell_num': cell_id,
-            'centr_y': int(y),
-            'centr_x': int(x),
-            'foci_area': spot_area,
-            'foci_circularity': focus_circularity,
-            'foci_total_intensity': spot_intensity,
-            'foci_mean_intensity': spot_mean_intensity,
-            'detection_prob': detection_prob,
-            'channel': channel_name
-        })
+        # Only save foci that were detected in parameter testing
+        # This should now never be 0 since we're using properly filtered coordinates
+        if detection_prob > 0:
+            # Track intensity for confident foci only (for nucleus summary)
+            if detection_prob >= DETECTION_THRESHOLD:
+                confident_foci_intensities.append(spot_intensity)
+            
+            foci_list.append({
+                'cell_num': cell_id,
+                'centr_y': int(y),
+                'centr_x': int(x),
+                'foci_area': spot_area,
+                'foci_circularity': focus_circularity,
+                'foci_total_intensity': spot_intensity,
+                'foci_mean_intensity': spot_mean_intensity,
+                'detection_prob': detection_prob,
+                'channel': channel_name
+            })
     
     # Calculate nucleus-level foci intensity statistics (ONLY from confident foci)
     sum_foci_intensity = float(np.sum(confident_foci_intensities)) if confident_foci_intensities else 0.0
@@ -272,9 +324,8 @@ def detect_foci_single_channel(nucleus_mask, image, original_image, channel_name
     return foci_list, summary
 
 
-
 # ===============================================================
-# MAIN WORKER FUNCTION 
+# MAIN WORKER FUNCTION (compatible with your task structure)
 # ===============================================================
 
 def process_single_nucleus(args):
@@ -363,51 +414,86 @@ def process_single_nucleus(args):
 
 
 # ===============================================================
-# EXAMPLE: How to modify your main script
+# SUMMARY OF TRACKED DATA
 # ===============================================================
 
 """
-INTEGRATION GUIDE:
+COMPLETE DATA TRACKING SUMMARY:
+================================
 
-In your main loop, change from:
-    tasks = [
-        (cellnum, masks, TRITC_pic, valid_param_samples, total_iterations, well_number, position_number)
-        for cellnum in cell_numbers
-    ]
+NUCLEUS DICTIONARY (one row per nucleus):
+-----------------------------------------
+Identifiers:
+  - cell_num: Nucleus ID
+  - Well: Well number
+  - Position: Position number
+  - centr_y, centr_x: Nucleus centroid coordinates
 
-To:
-    # Create channel dictionary
-    channel_images = {
-        'TRITC': TRITC_pic,
-        'FITC': FITC_pic,
-        'Cy5': Cy5_pic,
-        'DAPI': DAPI_pic
-    }
-    
-    tasks = [
-        (cellnum, masks, channel_images, valid_param_samples, total_iterations, well_number, position_number)
-        for cellnum in cell_numbers
-    ]
+DAPI Channel (Nucleus morphology):
+  - DAPI_area: Nucleus area in pixels
+  - DAPI_perimeter: Nucleus perimeter in pixels
+  - DAPI_circularity: Shape factor (4π*area/perimeter²), 1.0 = perfect circle
+  - DAPI_total_intensity: Sum of all pixel intensities in nucleus
+  - DAPI_mean_intensity: Total intensity / nucleus area
 
-Everything else stays the same! The worker will return:
-    - foci_data_list: now includes a 'channel' column to distinguish TRITC/FITC/Cy5 foci
-    - nuclei_data_list: includes columns like:
-        * DAPI_total_intensity, DAPI_mean_intensity
-        * TRITC_total_intensity, TRITC_mean_intensity, TRITC_mean_foci, TRITC_std_foci, etc.
-        * FITC_total_intensity, FITC_mean_intensity, FITC_mean_foci, FITC_std_foci, etc.
-        * Cy5_total_intensity, Cy5_mean_intensity, Cy5_mean_foci, Cy5_std_foci, etc.
+TRITC Channel (Signal + Foci):
+  - TRITC_total_intensity: Sum of all pixel intensities in nucleus
+  - TRITC_mean_intensity: Total intensity / nucleus area
+  - TRITC_sum_foci_intensity: Sum of intensities from CONFIDENT foci only (≥50% detection)
+  - TRITC_mean_foci_intensity: Average intensity per CONFIDENT focus
+  - TRITC_confident_foci_count: Number of foci passing detection threshold
+  - TRITC_mean_foci: Average number of foci across parameter iterations
+  - TRITC_std_foci: Standard deviation of foci counts
+  - TRITC_min_foci: Minimum foci detected across iterations
+  - TRITC_max_foci: Maximum foci detected across iterations
 
-Your existing CSV saving code will work without modification!
+FITC Channel (Signal + Foci):
+  - FITC_total_intensity: Sum of all pixel intensities in nucleus
+  - FITC_mean_intensity: Total intensity / nucleus area
+  - FITC_sum_foci_intensity: Sum of intensities from CONFIDENT foci only (≥50% detection)
+  - FITC_mean_foci_intensity: Average intensity per CONFIDENT focus
+  - FITC_confident_foci_count: Number of foci passing detection threshold
+  - FITC_mean_foci: Average number of foci across parameter iterations
+  - FITC_std_foci: Standard deviation of foci counts
+  - FITC_min_foci: Minimum foci detected
+  - FITC_max_foci: Maximum foci detected
 
-OPTIONAL: To save foci by channel separately:
-    if all_foci_data:
-        all_foci_df = pd.DataFrame(all_foci_data)
-        
-        # Save all foci together
-        all_foci_df.to_csv('all_foci_combined.csv', index=False)
-        
-        # Or save by channel
-        for channel in ['TRITC', 'FITC', 'Cy5']:
-            channel_foci = all_foci_df[all_foci_df['channel'] == channel]
-            save_dataframe_to_csv(channel_foci, folder_path, '3_param_iteration', f'foci_{channel}')
+Cy5 Channel (Signal only, no foci detection):
+  - Cy5_total_intensity: Sum of all pixel intensities in nucleus
+  - Cy5_mean_intensity: Total intensity / nucleus area
+
+
+FOCI DICTIONARY (one row per focus):
+------------------------------------
+Identifiers:
+  - cell_num: Parent nucleus ID
+  - Well: Well number
+  - Position: Position number
+  - channel: Which channel (TRITC or FITC)
+  - centr_y, centr_x: Focus centroid coordinates
+
+Focus Properties (TRITC and FITC only):
+  - foci_area: Focus area in pixels
+  - foci_circularity: Shape factor (4π*area/perimeter²)
+  - foci_total_intensity: Sum of pixel intensities in this focus
+  - foci_mean_intensity: Average pixel intensity in this focus
+  - detection_prob: Percentage of parameter iterations that detected this focus (robustness metric)
+
+
+BIOLOGICAL INTERPRETATION:
+==========================
+- Nucleus circularity → Nuclear shape abnormalities
+- Total intensity → Overall signal in nucleus (background + foci)
+- Sum foci intensity → Signal from confident foci only (robust measurement)
+- Mean foci intensity → Average brightness per confident focus
+- Confident foci count → Number of foci passing detection threshold (≥50%)
+- Detection probability → Per-focus confidence (0-100%)
+- Mean/std foci count → Stability of count across parameter space
+
+NOTE: sum_foci_intensity and mean_foci_intensity use ONLY "confident" foci 
+(detection_prob ≥ 50%) to ensure robust measurements. All individual foci 
+are still saved with their detection_prob, allowing post-hoc threshold adjustment.
+
+To change the detection threshold, modify DETECTION_THRESHOLD in line 224 
+(default = 50.0). Typical values: 50-70%.
 """

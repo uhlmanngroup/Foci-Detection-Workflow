@@ -9,11 +9,97 @@ from skimage.segmentation import watershed
 from scipy.spatial.distance import cdist
 from scipy import ndimage as ndi
 from collections import Counter
+import matplotlib.pyplot as plt
+from skimage.segmentation import mark_boundaries
+from skimage import exposure
+import os
 
 
 # ===============================================================
 # HELPER FUNCTIONS (module-level for multiprocessing)
 # ===============================================================
+
+def save_debug_image(isolated_img, water_labels, final_coords, foci_detection_count,
+                     total_iterations, cellnumber, channel_name, well_number, position_number,
+                     output_root, detection_threshold=50):
+    """
+    Save visualization of nucleus with watershed and foci overlay.
+    """
+    try:
+        debug_dir = os.path.join(output_root, "debug_images")
+        os.makedirs(debug_dir, exist_ok=True)
+
+        vis_img = exposure.rescale_intensity(isolated_img, in_range='image', out_range=(0, 1))
+        overlay_img = mark_boundaries(vis_img, water_labels, color=(1, 0, 0), mode='thick')
+
+        plt.figure(figsize=(5, 5))
+        plt.imshow(overlay_img, cmap='gray')
+
+        # Overlay detected foci
+        for (y, x) in final_coords:
+            detection_prob = (foci_detection_count.get((y, x), 0) / total_iterations) * 100
+            color = 'go' if detection_prob >= detection_threshold else 'yo'
+            plt.plot(x, y, color, markersize=4)
+
+        plt.title(f"Cell {cellnumber} | {channel_name} | W{well_number} P{position_number}")
+        plt.axis('off')
+        plt.tight_layout()
+
+        out_name = f"W{well_number}_P{position_number}_Cell{cellnumber}_{channel_name}.png"
+        out_path = os.path.join(debug_dir, out_name)
+        plt.savefig(out_path, dpi=200)
+        plt.close()
+
+    except Exception as e:
+        print(f"⚠️ Debug image save failed for cell {cellnumber} ({channel_name}): {e}")
+
+
+
+def save_global_visualizations(original_image, foci_tritc, foci_fitc, nucleus_mask,
+                               well_number, position_number, output_root):
+    """
+    Generate two full-image debug visualizations:
+    1. All foci (TRITC + FITC) on original image
+    2. Watershed / nucleus outlines for orientation
+    """
+    try:
+        debug_dir = os.path.join(output_root, "debug_images_global")
+        os.makedirs(debug_dir, exist_ok=True)
+
+        # --- 1. Full image with all foci ---
+        plt.figure(figsize=(8, 8))
+        vis_img = exposure.rescale_intensity(original_image, in_range='image', out_range=(0, 1))
+        plt.imshow(vis_img, cmap='gray')
+
+        # TRITC foci = red, FITC foci = green
+        for (y, x) in foci_tritc:
+            plt.plot(x, y, 'ro', markersize=2)
+        for (y, x) in foci_fitc:
+            plt.plot(x, y, 'go', markersize=2)
+
+        plt.title(f"All Foci | W{well_number} P{position_number}")
+        plt.axis('off')
+        plt.tight_layout()
+        plt.savefig(os.path.join(debug_dir, f"W{well_number}_P{position_number}_AllFoci.png"), dpi=200)
+        plt.close()
+
+        # --- 2. Full image with nucleus outlines ---
+        plt.figure(figsize=(8, 8))
+        plt.imshow(vis_img, cmap='gray')
+        outlined_img = mark_boundaries(vis_img, measure.label(nucleus_mask), color=(1, 1, 0), mode='thick')
+        plt.imshow(outlined_img)
+        plt.title(f"Nucleus Outlines | W{well_number} P{position_number}")
+        plt.axis('off')
+        plt.tight_layout()
+        plt.savefig(os.path.join(debug_dir, f"W{well_number}_P{position_number}_NucleusOutlines.png"), dpi=200)
+        plt.close()
+
+    except Exception as e:
+        print(f"⚠️ Failed to save global visualization for W{well_number} P{position_number}: {e}")
+
+
+
+
 
 def compute_circularity(area, perimeter):
     """Calculate circularity factor: 4π * area / perimeter^2"""
@@ -101,8 +187,11 @@ def analyze_channel_intensity(nucleus_mask, image, channel_name):
 # FOCI DETECTION FOR ONE CHANNEL
 # ===============================================================
 
-def detect_foci_single_channel(nucleus_mask, image, original_image, channel_name, cell_id,
-                                valid_param_samples, total_iterations):
+def detect_foci_single_channel(
+    nucleus_mask, image, original_image, channel_name, cell_id,
+    valid_param_samples, total_iterations,
+    well_number=None, position_number=None
+):
     """
     Detect foci in a single nucleus region for one channel.
     Returns: (foci_list, summary_dict)
@@ -320,7 +409,8 @@ def detect_foci_single_channel(nucleus_mask, image, original_image, channel_name
         f"{channel_name}_sum_foci_intensity": sum_foci_intensity,
         f"{channel_name}_mean_foci_intensity": mean_foci_intensity,
     }
-    
+
+            
     return foci_list, summary
 
 
@@ -391,13 +481,15 @@ def process_single_nucleus(args):
         # Detect foci ONLY for TRITC and FITC (FIXED LOGIC!)
         if channel_name in ["TRITC", "FITC"]:
             foci_list, foci_summary = detect_foci_single_channel(
-                masks_reduced, 
-                channel_image_float, 
-                channel_image_float,  # Use same image for global percentiles
-                channel_name, 
-                cellnumber,
-                valid_param_samples, 
-                total_iterations
+                masks_reduced,
+                channel_image_float,
+                channel_image_float,
+                channel_name,
+                cellnumber,  # <-- this is your cell ID
+                valid_param_samples,
+                total_iterations,
+                well_number,
+                position_number
             )
             
             # Add well and position to each focus
@@ -409,7 +501,11 @@ def process_single_nucleus(args):
             nucleus_data.update(foci_summary)
     
     nuclei_data_list = [nucleus_data]
+
+
     
+
+
     return foci_data_list, nuclei_data_list
 
 
