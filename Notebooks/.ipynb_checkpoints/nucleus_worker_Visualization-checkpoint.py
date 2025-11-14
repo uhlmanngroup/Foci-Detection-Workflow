@@ -13,6 +13,7 @@ from collections import Counter
 import matplotlib.pyplot as plt
 from skimage.segmentation import mark_boundaries
 from skimage import exposure
+import skimage as ski
 import os
 
 
@@ -64,8 +65,8 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
 
     try:
         # Create output directory if it doesn't exist
-        # This folder will contain all the global (full-field) visualization images
-        debug_dir = os.path.join(output_root, "debug_images_global")
+        # This folder will contain for both the FITC and the TRITC channel Images of the foci locations and their detected area
+        debug_dir = os.path.join(output_root, "Full_Images_Foci")
         os.makedirs(debug_dir, exist_ok=True)
 
         # Normalize the background image to 0-1 range for consistent display
@@ -81,10 +82,10 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
         plt.imshow(vis_img, cmap='gray')  # Display the DAPI background in grayscale
         
         # Plot each TRITC focus as a small red dot
-        # markersize=1.5 makes dots visible but not overwhelming
+        # markersize=0.35 makes dots visible but not overwhelming
         # alpha=0.7 adds slight transparency to see overlapping foci
         for (y, x) in foci_tritc:
-            plt.plot(x, y, 'ro', markersize=1.5, alpha=0.7)
+            plt.plot(x, y, 'ro', markersize=0.35, alpha=0.7)
         
         plt.title(f"TRITC Foci | Well {well_number} Position {position_number}", fontsize=14)
         plt.axis('off')  # Remove axis labels for cleaner image
@@ -106,7 +107,7 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
         
         # Plot each FITC focus as a small green dot
         for (y, x) in foci_fitc:
-            plt.plot(x, y, 'go', markersize=1.5, alpha=0.7)
+            plt.plot(x, y, 'go', markersize=0.35, alpha=0.7)
         
         plt.title(f"FITC Foci | Well {well_number} Position {position_number}", fontsize=14)
         plt.axis('off')
@@ -136,7 +137,7 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
             cmap_tritc = mcolors.ListedColormap(colors)  # Create custom colormap from random colors
             
             # Display as two layers:
-            # Layer 1: DAPI background at 50% opacity (alpha=0.5) to see cell structure
+            # Layer 1: DAPI background at 50% opacity (alpha=0.5) to see nucleus structure
             # Layer 2: Colored watershed regions at 70% opacity (alpha=0.7) overlaid on top
             plt.imshow(vis_img, cmap='gray', alpha=0.5)  # Semi-transparent background
             plt.imshow(watershed_labels_tritc, cmap=cmap_tritc, alpha=0.7, interpolation='nearest')
@@ -190,94 +191,6 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
         print(f"⚠️ Failed to save global visualizations for Well {well_number}, Position {position_number}: {e}")
         import traceback
         traceback.print_exc()
-
-
-
-
-
-
-def save_debug_image(isolated_img, water_labels, final_coords, foci_detection_count,
-                     total_iterations, cellnumber, channel_name, well_number, position_number,
-                     output_root, detection_threshold=50):
-    """
-    Save visualization of a single nucleus with watershed boundaries and foci overlay.
-    
-    Creates a per-nucleus debug image showing:
-    - The isolated nucleus region in grayscale
-    - Red watershed boundaries around detected foci
-    - Foci markers colored by detection confidence (green = high, yellow = low)
-    
-    This is used for quality control and troubleshooting individual nuclei.
-    
-    Parameters:
-    -----------
-    isolated_img : ndarray
-        The isolated nucleus image (background zeroed out)
-    water_labels : ndarray
-        Watershed segmentation labels for this nucleus's foci
-    final_coords : list of tuples
-        Final detected foci coordinates [(y, x), ...]
-    foci_detection_count : Counter
-        Dictionary tracking how many parameter iterations detected each focus
-    total_iterations : int
-        Total number of parameter combinations tested
-    cellnumber : int
-        Unique identifier for this nucleus
-    channel_name : str
-        Which channel is being visualized (TRITC or FITC)
-    well_number : str
-        Well identifier for filename
-    position_number : str
-        Position identifier for filename
-    output_root : str
-        Root directory for saving (creates debug_images subdirectory)
-    detection_threshold : float, optional
-        Minimum detection probability (%) to mark focus as confident (default: 50)
-    """
-    try:
-        # Create per-nucleus debug image directory
-        # These images are useful for inspecting individual nuclei in detail
-        debug_dir = os.path.join(output_root, "debug_images")
-        os.makedirs(debug_dir, exist_ok=True)
-
-        # Normalize the isolated nucleus image to 0-1 range for display
-        vis_img = exposure.rescale_intensity(isolated_img, in_range='image', out_range=(0, 1))
-        
-        # Draw red watershed boundaries on the normalized image
-        # This shows how the foci regions were segmented
-        overlay_img = mark_boundaries(vis_img, water_labels, color=(1, 0, 0), mode='thick')
-
-        # Create the figure
-        plt.figure(figsize=(5, 5))
-        plt.imshow(overlay_img, cmap='gray')
-
-        # Overlay detected foci with color-coded confidence markers
-        # Green = high confidence (≥50% detection rate)
-        # Yellow = lower confidence (<50% detection rate)
-        for (y, x) in final_coords:
-            # Calculate what percentage of parameter iterations detected this focus
-            # Higher percentage = more robust detection across parameter space
-            detection_prob = (foci_detection_count.get((y, x), 0) / total_iterations) * 100
-            
-            # Color-code by confidence: green if above threshold, yellow if below
-            color = 'go' if detection_prob >= detection_threshold else 'yo'
-            plt.plot(x, y, color, markersize=4)
-
-        # Add informative title showing which nucleus and channel
-        plt.title(f"Cell {cellnumber} | {channel_name} | W{well_number} P{position_number}")
-        plt.axis('off')  # Remove axis for cleaner image
-        plt.tight_layout()
-
-        # Save with descriptive filename including well, position, cell number, and channel
-        out_name = f"W{well_number}_P{position_number}_Cell{cellnumber}_{channel_name}.png"
-        out_path = os.path.join(debug_dir, out_name)
-        plt.savefig(out_path, dpi=200)
-        plt.close()  # Close figure to free memory
-
-    except Exception as e:
-        # If saving fails, print warning but don't crash the analysis
-        # This ensures one problematic image doesn't stop the entire pipeline
-        print(f"⚠️ Debug image save failed for cell {cellnumber} ({channel_name}): {e}")
 
 
 
@@ -691,13 +604,15 @@ def detect_foci_single_channel(
         return [], {}, None  # ← CHANGED: Added None
     
     # Perform watershed segmentation
-    gradient = filters.sobel(isolated_img)
+    gradient = filters.sobel(filtered_img) # Using the DoG filtered image to create topographical map for watershed
     
     markers = np.zeros_like(isolated_img, dtype=int)
     for idx, (y, x) in enumerate(final_coords, start=1):
         markers[y, x] = idx
-    
-    watershed_threshold = min_brightness * 1.5
+
+    # Calculating the threshold for the watershed simulation based on the picture
+    thresh_otsu = ski.filters.threshold_otsu(filtered_img)
+    watershed_threshold = min_brightness*best_contrast_thresh
     watershed_mask = (isolated_img > watershed_threshold) | (markers > 0)
     
     water_labels = watershed(gradient, markers, mask=watershed_mask)

@@ -13,6 +13,7 @@ from collections import Counter
 import matplotlib.pyplot as plt
 from skimage.segmentation import mark_boundaries
 from skimage import exposure
+import skimage as ski
 import os
 
 
@@ -608,8 +609,10 @@ def detect_foci_single_channel(
     markers = np.zeros_like(isolated_img, dtype=int)
     for idx, (y, x) in enumerate(final_coords, start=1):
         markers[y, x] = idx
-    
-    watershed_threshold = min_brightness # Minimal brightness from the best parameter set
+
+    # Calculating the threshold for the watershed simulation based on the picture
+    thresh_otsu = ski.filters.threshold_otsu(filtered_img)
+    watershed_threshold = min_brightness*best_contrast_thresh
     watershed_mask = (isolated_img > watershed_threshold) | (markers > 0)
     
     water_labels = watershed(gradient, markers, mask=watershed_mask)
