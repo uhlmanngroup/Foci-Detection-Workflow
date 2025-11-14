@@ -609,7 +609,7 @@ def detect_foci_single_channel(
     for idx, (y, x) in enumerate(final_coords, start=1):
         markers[y, x] = idx
     
-    watershed_threshold = min_brightness * 1.5
+    watershed_threshold = min_brightness # Minimal brightness from the best parameter set
     watershed_mask = (isolated_img > watershed_threshold) | (markers > 0)
     
     water_labels = watershed(gradient, markers, mask=watershed_mask)
