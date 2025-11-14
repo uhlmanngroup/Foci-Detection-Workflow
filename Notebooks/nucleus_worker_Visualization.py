@@ -23,76 +23,90 @@ import os
 # ===============================================================
 # SAVE GLOBAL VISUALIZATION (INCLUDES REAL WATERSHED)
 # ===============================================================
-"""
-Enhanced visualization function for full-field foci and watershed overlays.
-Saves 4 separate images per position:
-1. TRITC foci on original image
-2. FITC foci on original image  
-3. TRITC watershed outlines (yellow)
-4. FITC watershed outlines (yellow)
-"""
 
 def save_global_visualizations(original_image, foci_tritc, foci_fitc, 
                                watershed_labels_tritc, watershed_labels_fitc,
                                well_number, position_number, base_name, output_root):
     """
     Generate 4 full-field visualizations with proper filenames.
+    Watershed images show filled colored regions (no borders).
+    
+    This function creates comprehensive visualizations of the entire microscopy field:
+    - Two images showing detected foci as colored dots overlaid on the DAPI background
+    - Two images showing watershed segmentation regions as filled colored areas
     
     Parameters:
     -----------
     original_image : ndarray
-        Raw DAPI or merged channel image for background
+        Raw DAPI or merged channel image for background display
     foci_tritc : list of tuples
-        TRITC foci coordinates [(y, x), ...]
+        TRITC foci coordinates [(y, x), ...] from all nuclei in the image
     foci_fitc : list of tuples
-        FITC foci coordinates [(y, x), ...]
+        FITC foci coordinates [(y, x), ...] from all nuclei in the image
     watershed_labels_tritc : ndarray
-        Labeled watershed segmentation for TRITC channel
+        Labeled watershed segmentation for TRITC channel (entire image, all nuclei combined)
     watershed_labels_fitc : ndarray
-        Labeled watershed segmentation for FITC channel
+        Labeled watershed segmentation for FITC channel (entire image, all nuclei combined)
     well_number : str
-        Well identifier (e.g., '00044')
+        Well identifier extracted from filename (e.g., '00044')
     position_number : str
-        Position identifier (e.g., '00021')
+        Position identifier extracted from filename (e.g., '00021')
     base_name : str
         Original filename base (e.g., 'ATR2_24h--W00044--P00021--Z00000--T00000--')
     output_root : str
-        Root directory for saving images
+        Root directory for saving images (creates debug_images_global subdirectory)
     """
     import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    import numpy as np
     import os
     from skimage import exposure
-    from skimage.segmentation import mark_boundaries
 
     try:
+        # Create output directory if it doesn't exist
+        # This folder will contain all the global (full-field) visualization images
         debug_dir = os.path.join(output_root, "debug_images_global")
         os.makedirs(debug_dir, exist_ok=True)
 
-        # Normalize image once for all visualizations
+        # Normalize the background image to 0-1 range for consistent display
+        # This ensures the grayscale background is properly visible regardless of original intensity range
         vis_img = exposure.rescale_intensity(original_image, in_range='image', out_range=(0, 1))
 
-        # --- 1️⃣ TRITC FOCI OVERLAY ---
+        # ================================================================
+        # 1️⃣ TRITC FOCI OVERLAY (RED DOTS ON GRAY BACKGROUND)
+        # ================================================================
+        # Creates an image showing all detected TRITC foci as red dots
+        # This gives an overview of TRITC foci distribution across the entire field
         plt.figure(figsize=(10, 10))
-        plt.imshow(vis_img, cmap='gray')
+        plt.imshow(vis_img, cmap='gray')  # Display the DAPI background in grayscale
         
+        # Plot each TRITC focus as a small red dot
+        # markersize=1.5 makes dots visible but not overwhelming
+        # alpha=0.7 adds slight transparency to see overlapping foci
         for (y, x) in foci_tritc:
-            plt.plot(x, y, 'ro', markersize=0.3, alpha=1)
+            plt.plot(x, y, 'ro', markersize=1.5, alpha=0.7)
         
         plt.title(f"TRITC Foci | Well {well_number} Position {position_number}", fontsize=14)
-        plt.axis('off')
+        plt.axis('off')  # Remove axis labels for cleaner image
         plt.tight_layout()
         
+        # Save with original filename convention + channel identifier
         filename = f"{base_name}TRITC_foci.png"
         plt.savefig(os.path.join(debug_dir, filename), dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"✓ Saved TRITC foci visualization: {filename}")
+        plt.close()  # Close figure to free memory
+        print(f"  ✓ Saved: {filename}")
 
-        # --- 2️⃣ FITC FOCI OVERLAY ---
+        # ================================================================
+        # 2️⃣ FITC FOCI OVERLAY (GREEN DOTS ON GRAY BACKGROUND)
+        # ================================================================
+        # Creates an image showing all detected FITC foci as green dots
+        # Same logic as TRITC but with green color ('go') for FITC channel
         plt.figure(figsize=(10, 10))
         plt.imshow(vis_img, cmap='gray')
         
+        # Plot each FITC focus as a small green dot
         for (y, x) in foci_fitc:
-            plt.plot(x, y, 'go', markersize=0.3, alpha=1)
+            plt.plot(x, y, 'go', markersize=1.5, alpha=0.7)
         
         plt.title(f"FITC Foci | Well {well_number} Position {position_number}", fontsize=14)
         plt.axis('off')
@@ -101,13 +115,35 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
         filename = f"{base_name}FITC_foci.png"
         plt.savefig(os.path.join(debug_dir, filename), dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"✓ Saved FITC foci visualization: {filename}")
+        print(f"  ✓ Saved: {filename}")
 
-        # --- 3️⃣ TRITC WATERSHED OUTLINES ---
-        outlined_img_tritc = mark_boundaries(vis_img, watershed_labels_tritc, 
-                                            color=(1, 1, 0), mode='thick')
+        # ================================================================
+        # 3️⃣ TRITC WATERSHED (FILLED COLORED REGIONS - NO BORDERS)
+        # ================================================================
+        # Shows watershed segmentation regions as filled colored areas
+        # Each individual focus region gets a unique random color for easy distinction
         plt.figure(figsize=(10, 10))
-        plt.imshow(outlined_img_tritc)
+        
+        # Get the maximum label number to determine how many colors we need
+        # Each watershed region has a unique label (1, 2, 3, ...)
+        num_labels_tritc = int(watershed_labels_tritc.max())
+        if num_labels_tritc > 0:
+            # Generate a random color for each watershed region
+            # This ensures neighboring foci are visually distinguishable
+            np.random.seed(42)  # For reproducibility across runs
+            colors = np.random.rand(num_labels_tritc + 1, 3)  # +1 because label 0 is background
+            colors[0] = [0, 0, 0]  # Force background (label 0) to be black
+            cmap_tritc = mcolors.ListedColormap(colors)  # Create custom colormap from random colors
+            
+            # Display as two layers:
+            # Layer 1: DAPI background at 50% opacity (alpha=0.5) to see cell structure
+            # Layer 2: Colored watershed regions at 70% opacity (alpha=0.7) overlaid on top
+            plt.imshow(vis_img, cmap='gray', alpha=0.5)  # Semi-transparent background
+            plt.imshow(watershed_labels_tritc, cmap=cmap_tritc, alpha=0.7, interpolation='nearest')
+        else:
+            # If no foci were detected, just show the background image
+            plt.imshow(vis_img, cmap='gray')
+        
         plt.title(f"TRITC Watershed | Well {well_number} Position {position_number}", fontsize=14)
         plt.axis('off')
         plt.tight_layout()
@@ -115,13 +151,30 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
         filename = f"{base_name}TRITC_watershed.png"
         plt.savefig(os.path.join(debug_dir, filename), dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"✓ Saved TRITC watershed visualization: {filename}")
+        print(f"  ✓ Saved: {filename}")
 
-        # --- 4️⃣ FITC WATERSHED OUTLINES ---
-        outlined_img_fitc = mark_boundaries(vis_img, watershed_labels_fitc, 
-                                           color=(1, 1, 0), mode='thick')
+        # ================================================================
+        # 4️⃣ FITC WATERSHED (FILLED COLORED REGIONS - NO BORDERS)
+        # ================================================================
+        # Same logic as TRITC watershed but for FITC channel
+        # Uses different random seed (43) to ensure different colors than TRITC
         plt.figure(figsize=(10, 10))
-        plt.imshow(outlined_img_fitc)
+        
+        num_labels_fitc = int(watershed_labels_fitc.max())
+        if num_labels_fitc > 0:
+            # Generate random colors for FITC watershed regions
+            # Different seed (43 vs 42) ensures FITC colors differ from TRITC
+            np.random.seed(43)  # Different seed for different color palette
+            colors = np.random.rand(num_labels_fitc + 1, 3)
+            colors[0] = [0, 0, 0]  # Background is black
+            cmap_fitc = mcolors.ListedColormap(colors)
+            
+            # Display with same transparency settings as TRITC
+            plt.imshow(vis_img, cmap='gray', alpha=0.5)
+            plt.imshow(watershed_labels_fitc, cmap=cmap_fitc, alpha=0.7, interpolation='nearest')
+        else:
+            plt.imshow(vis_img, cmap='gray')
+        
         plt.title(f"FITC Watershed | Well {well_number} Position {position_number}", fontsize=14)
         plt.axis('off')
         plt.tight_layout()
@@ -129,9 +182,11 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
         filename = f"{base_name}FITC_watershed.png"
         plt.savefig(os.path.join(debug_dir, filename), dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"✓ Saved FITC watershed visualization: {filename}")
+        print(f"  ✓ Saved: {filename}")
 
     except Exception as e:
+        # If any error occurs, print detailed error message with traceback
+        # This helps debug issues without crashing the entire analysis pipeline
         print(f"⚠️ Failed to save global visualizations for Well {well_number}, Position {position_number}: {e}")
         import traceback
         traceback.print_exc()
@@ -145,57 +200,173 @@ def save_debug_image(isolated_img, water_labels, final_coords, foci_detection_co
                      total_iterations, cellnumber, channel_name, well_number, position_number,
                      output_root, detection_threshold=50):
     """
-    Save visualization of nucleus with watershed and foci overlay.
+    Save visualization of a single nucleus with watershed boundaries and foci overlay.
+    
+    Creates a per-nucleus debug image showing:
+    - The isolated nucleus region in grayscale
+    - Red watershed boundaries around detected foci
+    - Foci markers colored by detection confidence (green = high, yellow = low)
+    
+    This is used for quality control and troubleshooting individual nuclei.
+    
+    Parameters:
+    -----------
+    isolated_img : ndarray
+        The isolated nucleus image (background zeroed out)
+    water_labels : ndarray
+        Watershed segmentation labels for this nucleus's foci
+    final_coords : list of tuples
+        Final detected foci coordinates [(y, x), ...]
+    foci_detection_count : Counter
+        Dictionary tracking how many parameter iterations detected each focus
+    total_iterations : int
+        Total number of parameter combinations tested
+    cellnumber : int
+        Unique identifier for this nucleus
+    channel_name : str
+        Which channel is being visualized (TRITC or FITC)
+    well_number : str
+        Well identifier for filename
+    position_number : str
+        Position identifier for filename
+    output_root : str
+        Root directory for saving (creates debug_images subdirectory)
+    detection_threshold : float, optional
+        Minimum detection probability (%) to mark focus as confident (default: 50)
     """
     try:
+        # Create per-nucleus debug image directory
+        # These images are useful for inspecting individual nuclei in detail
         debug_dir = os.path.join(output_root, "debug_images")
         os.makedirs(debug_dir, exist_ok=True)
 
+        # Normalize the isolated nucleus image to 0-1 range for display
         vis_img = exposure.rescale_intensity(isolated_img, in_range='image', out_range=(0, 1))
+        
+        # Draw red watershed boundaries on the normalized image
+        # This shows how the foci regions were segmented
         overlay_img = mark_boundaries(vis_img, water_labels, color=(1, 0, 0), mode='thick')
 
+        # Create the figure
         plt.figure(figsize=(5, 5))
         plt.imshow(overlay_img, cmap='gray')
 
-        # Overlay detected foci
+        # Overlay detected foci with color-coded confidence markers
+        # Green = high confidence (≥50% detection rate)
+        # Yellow = lower confidence (<50% detection rate)
         for (y, x) in final_coords:
+            # Calculate what percentage of parameter iterations detected this focus
+            # Higher percentage = more robust detection across parameter space
             detection_prob = (foci_detection_count.get((y, x), 0) / total_iterations) * 100
+            
+            # Color-code by confidence: green if above threshold, yellow if below
             color = 'go' if detection_prob >= detection_threshold else 'yo'
             plt.plot(x, y, color, markersize=4)
 
+        # Add informative title showing which nucleus and channel
         plt.title(f"Cell {cellnumber} | {channel_name} | W{well_number} P{position_number}")
-        plt.axis('off')
+        plt.axis('off')  # Remove axis for cleaner image
         plt.tight_layout()
 
+        # Save with descriptive filename including well, position, cell number, and channel
         out_name = f"W{well_number}_P{position_number}_Cell{cellnumber}_{channel_name}.png"
         out_path = os.path.join(debug_dir, out_name)
         plt.savefig(out_path, dpi=200)
-        plt.close()
+        plt.close()  # Close figure to free memory
 
     except Exception as e:
+        # If saving fails, print warning but don't crash the analysis
+        # This ensures one problematic image doesn't stop the entire pipeline
         print(f"⚠️ Debug image save failed for cell {cellnumber} ({channel_name}): {e}")
 
 
+
 def compute_circularity(area, perimeter):
-    """Calculate circularity factor: 4π * area / perimeter^2"""
+    """
+    Calculate circularity factor: 4π * area / perimeter²
+    
+    Circularity is a shape descriptor that indicates how circular an object is:
+    - Value of 1.0 = perfect circle
+    - Values approaching 0 = elongated or irregular shapes
+    
+    This is used to characterize both nuclei and individual foci shapes.
+    Formula: C = 4π * A / P²
+    where A = area in pixels, P = perimeter in pixels
+    
+    Parameters:
+    -----------
+    area : float
+        Area of the region in pixels
+    perimeter : float
+        Perimeter of the region in pixels
+        
+    Returns:
+    --------
+    float : Circularity value between 0 and 1
+    """
+    # Avoid division by zero if perimeter is zero (shouldn't happen but safety check)
     if perimeter == 0:
         return 0.0
+    
+    # Standard circularity formula
+    # A perfect circle has maximum circularity (approaches 1.0)
+    # Irregular or elongated shapes have lower values
     return (4 * np.pi * area) / (perimeter ** 2)
 
 
 def compute_local_percentiles_for_candidates(image, coords, unique_percentiles):
-    """Calculate local background percentiles around each candidate focus."""
-    N = coords.shape[0]
-    P = len(unique_percentiles)
-    out = np.zeros((N, P), dtype=float)
+    """
+    Calculate local background percentiles around each candidate focus.
+    
+    For each candidate focus position, this function extracts a small 13x13 pixel
+    neighborhood (±6 pixels in each direction) and computes background intensity
+    percentiles. This local background measurement is crucial for distinguishing
+    true foci from background noise.
+    
+    Why local background matters:
+    - Microscopy images often have uneven illumination
+    - Using global thresholds would miss dim foci in bright areas or detect
+      noise in dark areas
+    - Local background allows adaptive thresholding
+    
+    Parameters:
+    -----------
+    image : ndarray
+        The image being analyzed (isolated nucleus or filtered version)
+    coords : ndarray of shape (N, 2)
+        Array of (y, x) coordinates for N candidate foci
+    unique_percentiles : array-like
+        List of percentile values to compute (e.g., [50, 75, 90])
+        
+    Returns:
+    --------
+    ndarray of shape (N, P) : Local percentile values for each candidate
+        where N = number of candidates, P = number of percentiles requested
+    """
+    N = coords.shape[0]  # Number of candidate foci
+    P = len(unique_percentiles)  # Number of percentile thresholds to compute
+    out = np.zeros((N, P), dtype=float)  # Preallocate output array
+    
+    # Process each candidate focus location
     for i, (y, x) in enumerate(coords):
+        # Define 13x13 pixel neighborhood around the candidate focus
+        # ±6 pixels in each direction, bounded by image edges
         y_min, y_max = max(0, y - 6), min(image.shape[0], y + 7)
         x_min, x_max = max(0, x - 6), min(image.shape[1], x + 7)
+        
+        # Extract the local neighborhood square
         square = image[y_min:y_max, x_min:x_max]
+        
+        # Handle edge case: if somehow we got an empty region (shouldn't happen)
+        # just use the center pixel value
         if square.size == 0:
             out[i, :] = image[y, x]
         else:
+            # Compute the requested percentiles of the local background
+            # These percentiles represent local background intensity levels
+            # For example, 75th percentile = threshold where 75% of pixels are dimmer
             out[i, :] = np.percentile(square, unique_percentiles)
+    
     return out
 
 
@@ -204,54 +375,166 @@ def apply_foci_filters(p_idx, bright_pcts, contrast_threshs, percentile_vals,
                        unf_intensities, filt_intensities,
                        local_percentiles_unf, local_percentiles_filt,
                        distances, unf_yx, tolerance):
-    """Apply filtering to detect valid foci for one parameter combination."""
-    bright_pct = bright_pcts[p_idx]
-    contrast_thresh = contrast_threshs[p_idx]
-    min_brightness = min_brightness_per_param[p_idx]
+    """
+    Apply filtering to detect valid foci for one parameter combination.
     
-    bright_key = np.round(bright_pct, 6)
+    This function tests whether candidate foci pass both absolute brightness and
+    local contrast criteria for a specific set of detection parameters. It's called
+    repeatedly with different parameter combinations to assess detection robustness.
+    
+    The filtering process:
+    1. ABSOLUTE brightness filter: Is the focus bright enough overall?
+    2. LOCAL CONTRAST filter: Is the focus brighter than its local background?
+    3. SPATIAL MATCHING: Does the same focus appear in both filtered and unfiltered images?
+    
+    Only foci that pass all three criteria are considered valid detections.
+    
+    Parameters:
+    -----------
+    p_idx : int
+        Index of the parameter combination being tested
+    bright_pcts : array
+        Array of brightness percentile thresholds (one per parameter combo)
+    contrast_threshs : array
+        Array of contrast threshold multipliers (one per parameter combo)
+    percentile_vals : array
+        Array of global percentile values for absolute brightness (one per combo)
+    min_brightness_per_param : array
+        Precomputed minimum brightness thresholds from global percentiles
+    bright_to_idx : dict
+        Mapping from brightness percentile to column index in local_percentiles arrays
+    unf_intensities : array
+        Peak intensities in the unfiltered image
+    filt_intensities : array
+        Peak intensities in the filtered (DoG) image
+    local_percentiles_unf : ndarray
+        Local background percentiles for unfiltered peaks
+    local_percentiles_filt : ndarray
+        Local background percentiles for filtered peaks
+    distances : ndarray
+        Distance matrix between unfiltered and filtered peak coordinates
+    unf_yx : ndarray
+        Coordinates of unfiltered peaks
+    tolerance : int
+        Maximum pixel distance to consider two peaks as "the same" (typically 2)
+        
+    Returns:
+    --------
+    tuple : (confirmed_coords, count)
+        confirmed_coords : ndarray of shape (M, 2)
+            Coordinates of foci that passed all filters
+        count : int
+            Number of confirmed foci
+    """
+    # Extract the specific parameters for this iteration
+    bright_pct = bright_pcts[p_idx]           # Local background percentile threshold
+    contrast_thresh = contrast_threshs[p_idx]  # Contrast multiplier (e.g., 2.5x background)
+    min_brightness = min_brightness_per_param[p_idx]  # Absolute brightness threshold
+    
+    # Map the brightness percentile to the correct column in the local percentiles array
+    bright_key = np.round(bright_pct, 6)  # Round to avoid floating point comparison issues
     b_idx = bright_to_idx[bright_key]
     
-    # Absolute brightness filters
+    # ---- STEP 1: ABSOLUTE BRIGHTNESS FILTER ----
+    # Check if peak intensities exceed the global minimum brightness threshold
+    # This filters out very dim spots that are likely noise regardless of local context
     unf_mask_abs = unf_intensities >= min_brightness
     filt_mask_abs = filt_intensities >= min_brightness
+    
+    # Early exit: if no peaks pass absolute brightness in either image, return empty result
     if not np.any(unf_mask_abs) or not np.any(filt_mask_abs):
         return np.array([]).reshape(0, 2), 0
     
-    # Contrast filters
+    # ---- STEP 2: LOCAL CONTRAST FILTER ----
+    # Check if peaks are sufficiently brighter than their local background
+    # Extract the local background value at the specified percentile for each peak
     unf_local_bg = local_percentiles_unf[:, b_idx]
     filt_local_bg = local_percentiles_filt[:, b_idx]
+    
+    # Apply contrast threshold: peak must be > (local_background × contrast_thresh)
+    # Example: if contrast_thresh=2.5, peak must be 2.5× brighter than local background
     unf_mask_con = unf_intensities > (unf_local_bg * contrast_thresh)
     filt_mask_con = filt_intensities > (filt_local_bg * contrast_thresh)
     
-    # Combine filters
+    # ---- STEP 3: COMBINE FILTERS ----
+    # A valid peak must pass BOTH absolute brightness AND local contrast filters
     unf_final_mask = unf_mask_abs & unf_mask_con
     filt_final_mask = filt_mask_abs & filt_mask_con
     
+    # Get the indices of peaks that passed all filters
     unf_idxs = np.where(unf_final_mask)[0]
     filt_idxs = np.where(filt_final_mask)[0]
+    
+    # Early exit: if no peaks passed filters in either image, return empty result
     if unf_idxs.size == 0 or filt_idxs.size == 0:
         return np.array([]).reshape(0, 2), 0
     
-    # Match filtered and unfiltered foci
+    # ---- STEP 4: SPATIAL MATCHING ----
+    # Match filtered and unfiltered foci: only keep foci that appear in BOTH images
+    # This confirms that the focus is a real feature, not an artifact of filtering
+    
+    # Extract the sub-matrix of distances between valid unfiltered and filtered peaks
     distances_sub = distances[unf_idxs][:, filt_idxs]
+    
+    # For each valid unfiltered peak, find the distance to its nearest valid filtered peak
     nearest_dist = np.min(distances_sub, axis=1)
+    
+    # Keep only unfiltered peaks that have a matching filtered peak within tolerance
+    # Tolerance of 2 pixels allows for slight spatial shifts due to filtering
     confirmed_unf_idxs = unf_idxs[nearest_dist <= tolerance]
+    
+    # Get the final coordinates of confirmed foci
     confirmed_coords = unf_yx[confirmed_unf_idxs]
     
+    # Return both the coordinates and the count
     return confirmed_coords, len(confirmed_coords)
-
 
 # ===============================================================
 # INTENSITY ANALYSIS
 # ===============================================================
 
 def analyze_channel_intensity(nucleus_mask, image, channel_name):
-    """Compute total and mean intensity for one nucleus in one channel."""
+    """
+    Compute total and mean intensity for one nucleus in one channel.
+    
+    This function calculates basic intensity statistics for an entire nucleus region.
+    These measurements represent the overall signal in the nucleus, including both
+    background and any foci present.
+    
+    Why measure whole-nucleus intensity:
+    - Provides context for foci measurements (foci intensity relative to background)
+    - Detects overall expression levels or staining intensity
+    - Can indicate technical issues (e.g., uneven staining)
+    
+    Parameters:
+    -----------
+    nucleus_mask : ndarray (boolean)
+        Binary mask indicating which pixels belong to this nucleus
+    image : ndarray
+        The image to measure (should be float, 0-1 range)
+    channel_name : str
+        Name of the channel (e.g., 'TRITC', 'FITC', 'Cy5', 'DAPI')
+        
+    Returns:
+    --------
+    dict : Dictionary with two keys:
+        '{channel_name}_total_intensity' : Sum of all pixel intensities in nucleus
+        '{channel_name}_mean_intensity' : Average pixel intensity in nucleus
+    """
+    # Extract only the pixels belonging to this nucleus
     nucleus_pixels = image[nucleus_mask]
+    
+    # Calculate total intensity: sum of all pixel values
+    # This represents the total amount of signal in the nucleus
+    # Higher values = more fluorescence (more protein, more RNA, etc.)
     total_intensity = float(np.sum(nucleus_pixels))
+    
+    # Calculate mean intensity: average pixel value
+    # This represents the average brightness, normalized by nucleus size
+    # Useful for comparing nuclei of different sizes
     mean_intensity = float(np.mean(nucleus_pixels))
     
+    # Return as dictionary with channel-specific keys for easy DataFrame creation
     return {
         f"{channel_name}_total_intensity": total_intensity,
         f"{channel_name}_mean_intensity": mean_intensity,
