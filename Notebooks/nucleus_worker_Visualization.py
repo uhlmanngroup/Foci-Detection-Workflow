@@ -15,11 +15,17 @@ from skimage.segmentation import mark_boundaries
 from skimage import exposure
 import skimage as ski
 import os
+from PIL import Image
+
 
 
 # ===============================================================
 # HELPER FUNCTIONS (module-level for multiprocessing)
 # ===============================================================
+
+
+
+
 
 # ===============================================================
 # SAVE GLOBAL VISUALIZATION (INCLUDES REAL WATERSHED)
@@ -460,7 +466,7 @@ def analyze_channel_intensity(nucleus_mask, image, channel_name):
 
 def detect_foci_single_channel(
     nucleus_mask, image, original_image, channel_name, cell_id,
-    valid_param_samples, total_iterations,
+    valid_param_samples, total_iterations, water_threshold_percentile,
     well_number=None, position_number=None
 ):
     """
@@ -602,18 +608,20 @@ def detect_foci_single_channel(
     
     if len(final_coords) == 0:
         return [], {}, None  # ← CHANGED: Added None
-    
+
+
+
+    filtered_img = exposure.rescale_intensity(filtered_img, in_range='image', out_range=(0, 100))
     # Perform watershed segmentation
     gradient = filters.sobel(filtered_img) # Using the DoG filtered image to create topographical map for watershed
     
     markers = np.zeros_like(isolated_img, dtype=int)
     for idx, (y, x) in enumerate(final_coords, start=1):
         markers[y, x] = idx
-
+ 
     # Calculating the threshold for the watershed simulation based on the picture
-    thresh_otsu = ski.filters.threshold_otsu(filtered_img)
-    watershed_threshold = min_brightness*best_contrast_thresh
-    watershed_mask = (isolated_img > watershed_threshold) | (markers > 0)
+    watershed_threshold = water_threshold_percentile
+    watershed_mask = (filtered_img > watershed_threshold) | (markers > 0)
     
     water_labels = watershed(gradient, markers, mask=watershed_mask)
     
@@ -685,7 +693,7 @@ def process_single_nucleus(args):
     watershed_data_list contains dictionaries with watershed labels for each channel
     """
     (cellnumber, masks, channel_images, valid_param_samples, 
-     total_iterations, well_number, position_number) = args
+     total_iterations, well_number, position_number, water_threshold_percentile) = args
     
     # Create mask for current nucleus
     masks_reduced = (masks == cellnumber)
@@ -737,6 +745,7 @@ def process_single_nucleus(args):
                 cellnumber,
                 valid_param_samples,
                 total_iterations,
+                water_threshold_percentile, 
                 well_number,
                 position_number
             )
