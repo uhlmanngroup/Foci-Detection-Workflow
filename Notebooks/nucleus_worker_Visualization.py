@@ -64,8 +64,8 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
 
     try:
         # Create output directory if it doesn't exist
-        # This folder will contain all the global (full-field) visualization images
-        debug_dir = os.path.join(output_root, "debug_images_global")
+        # This folder will contain for both the FITC and the TRITC channel Images of the foci locations and their detected area
+        debug_dir = os.path.join(output_root, "Full_Images_Foci")
         os.makedirs(debug_dir, exist_ok=True)
 
         # Normalize the background image to 0-1 range for consistent display
@@ -81,10 +81,10 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
         plt.imshow(vis_img, cmap='gray')  # Display the DAPI background in grayscale
         
         # Plot each TRITC focus as a small red dot
-        # markersize=1.5 makes dots visible but not overwhelming
+        # markersize=0.35 makes dots visible but not overwhelming
         # alpha=0.7 adds slight transparency to see overlapping foci
         for (y, x) in foci_tritc:
-            plt.plot(x, y, 'ro', markersize=1.5, alpha=0.7)
+            plt.plot(x, y, 'ro', markersize=0.35, alpha=0.7)
         
         plt.title(f"TRITC Foci | Well {well_number} Position {position_number}", fontsize=14)
         plt.axis('off')  # Remove axis labels for cleaner image
@@ -106,7 +106,7 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
         
         # Plot each FITC focus as a small green dot
         for (y, x) in foci_fitc:
-            plt.plot(x, y, 'go', markersize=1.5, alpha=0.7)
+            plt.plot(x, y, 'go', markersize=0.35, alpha=0.7)
         
         plt.title(f"FITC Foci | Well {well_number} Position {position_number}", fontsize=14)
         plt.axis('off')
