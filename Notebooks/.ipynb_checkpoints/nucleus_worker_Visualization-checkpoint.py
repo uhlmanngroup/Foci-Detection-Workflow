@@ -16,7 +16,7 @@ from skimage import exposure
 import skimage as ski
 import os
 from PIL import Image
-
+from skimage.morphology import binary_erosion, disk
 
 
 # ===============================================================
@@ -224,67 +224,130 @@ def compute_circularity(area, perimeter):
     float : Circularity value between 0 and 1
     """
     # Avoid division by zero if perimeter is zero (shouldn't happen but safety check)
-    if perimeter == 0:
+    if perimeter == 0 or area == 0:
         return 0.0
     
     # Standard circularity formula
     # A perfect circle has maximum circularity (approaches 1.0)
     # Irregular or elongated shapes have lower values
-    return (4 * np.pi * area) / (perimeter ** 2)
+    circularity = (4 * np.pi * area) / (perimeter ** 2)
+        
+    # Cap at 1.0 to handle numerical artifacts from discrete pixel measurements
+    # This can happen with very small regions where perimeter approximation
+    # is less accurate
+    return min(circularity, 1.0)
 
 
-def compute_local_percentiles_for_candidates(image, coords, unique_percentiles):
+def compute_adaptive_background_expanded_edge(image, coords, unique_percentiles, 
+                                             nucleus_mask=None, 
+                                             inner_radius=2, outer_radius=6,
+                                             edge_outer_radius=12,
+                                             use_global_fallback=True,
+                                             density_threshold=0.15,
+                                             edge_zone_distance=6):
     """
-    Calculate local background percentiles around each candidate focus.
+    ALTERNATIVE APPROACH: Use EXPANDED annulus at edges instead of global fallback.
     
-    For each candidate focus position, this function extracts a small 13x13 pixel
-    neighborhood (±6 pixels in each direction) and computes background intensity
-    percentiles. This local background measurement is crucial for distinguishing
-    true foci from background noise.
+    Strategy:
+    - Interior: Standard annulus (r=2-6) with global fallback for dense regions
+    - Edges: LARGER annulus (r=2-12) to get more local context, NO global fallback
     
-    Why local background matters:
-    - Microscopy images often have uneven illumination
-    - Using global thresholds would miss dim foci in bright areas or detect
-      noise in dark areas
-    - Local background allows adaptive thresholding
+    This way edges always use local information, preventing artifacts, while
+    interior can still benefit from global fallback for dense foci detection.
     
     Parameters:
     -----------
-    image : ndarray
-        The image being analyzed (isolated nucleus or filtered version)
-    coords : ndarray of shape (N, 2)
-        Array of (y, x) coordinates for N candidate foci
-    unique_percentiles : array-like
-        List of percentile values to compute (e.g., [50, 75, 90])
-        
-    Returns:
-    --------
-    ndarray of shape (N, P) : Local percentile values for each candidate
-        where N = number of candidates, P = number of percentiles requested
+    edge_outer_radius : int
+        Larger outer radius for edge regions (default 12 vs 6 for interior)
     """
-    N = coords.shape[0]  # Number of candidate foci
-    P = len(unique_percentiles)  # Number of percentile thresholds to compute
-    out = np.zeros((N, P), dtype=float)  # Preallocate output array
+    import numpy as np
+    from scipy.ndimage import distance_transform_edt
     
-    # Process each candidate focus location
+    N = coords.shape[0]
+    P = len(unique_percentiles)
+    out = np.zeros((N, P), dtype=float)
+    
+    # Compute edge distance map
+    edge_distances = None
+    if nucleus_mask is not None:
+        edge_distances = distance_transform_edt(nucleus_mask)
+    
+    # Compute global background
+    global_background = np.percentile(image, unique_percentiles)
+    global_median = np.percentile(image, 50)
+    
+    # Pre-compute BOTH annulus masks
+    # Standard annulus for interior
+    y_grid, x_grid = np.ogrid[-outer_radius:outer_radius+1, -outer_radius:outer_radius+1]
+    distances = np.sqrt(x_grid**2 + y_grid**2)
+    std_annulus = (distances >= inner_radius) & (distances <= outer_radius)
+    std_y, std_x = np.where(std_annulus)
+    std_y -= outer_radius
+    std_x -= outer_radius
+    
+    # Expanded annulus for edges
+    y_grid_big, x_grid_big = np.ogrid[-edge_outer_radius:edge_outer_radius+1, 
+                                       -edge_outer_radius:edge_outer_radius+1]
+    distances_big = np.sqrt(x_grid_big**2 + y_grid_big**2)
+    edge_annulus = (distances_big >= inner_radius) & (distances_big <= edge_outer_radius)
+    edge_y, edge_x = np.where(edge_annulus)
+    edge_y -= edge_outer_radius
+    edge_x -= edge_outer_radius
+    
+    # Process each candidate
     for i, (y, x) in enumerate(coords):
-        # Define 13x13 pixel neighborhood around the candidate focus
-        # ±6 pixels in each direction, bounded by image edges
-        y_min, y_max = max(0, y - 6), min(image.shape[0], y + 7)
-        x_min, x_max = max(0, x - 6), min(image.shape[1], x + 7)
+        # Determine if we're near an edge
+        is_near_edge = False
+        if edge_distances is not None:
+            dist_from_edge = edge_distances[y, x]
+            is_near_edge = dist_from_edge <= edge_zone_distance
         
-        # Extract the local neighborhood square
-        square = image[y_min:y_max, x_min:x_max]
-        
-        # Handle edge case: if somehow we got an empty region (shouldn't happen)
-        # just use the center pixel value
-        if square.size == 0:
-            out[i, :] = image[y, x]
+        # Select appropriate annulus
+        if is_near_edge:
+            annulus_y, annulus_x = edge_y, edge_x
+            min_pixels = 15  # Need more pixels for larger annulus
+            use_fallback = False  # CRITICAL: No global fallback at edges
         else:
-            # Compute the requested percentiles of the local background
-            # These percentiles represent local background intensity levels
-            # For example, 75th percentile = threshold where 75% of pixels are dimmer
-            out[i, :] = np.percentile(square, unique_percentiles)
+            annulus_y, annulus_x = std_y, std_x
+            min_pixels = 5
+            use_fallback = use_global_fallback
+        
+        # Compute absolute positions
+        abs_y = y + annulus_y
+        abs_x = x + annulus_x
+        
+        # Filter for image bounds
+        valid = (abs_y >= 0) & (abs_y < image.shape[0]) & \
+                (abs_x >= 0) & (abs_x < image.shape[1])
+        
+        # Filter for nucleus interior
+        if nucleus_mask is not None:
+            valid_indices = np.where(valid)[0]
+            nucleus_valid = nucleus_mask[abs_y[valid_indices], abs_x[valid_indices]] > 0
+            valid[valid_indices] = nucleus_valid
+        
+        if valid.sum() >= min_pixels:
+            annulus_pixels = image[abs_y[valid], abs_x[valid]]
+            local_percentiles = np.percentile(annulus_pixels, unique_percentiles)
+            
+            if use_fallback:
+                # Interior: Check for dense regions
+                local_median = np.percentile(annulus_pixels, 50)
+                if local_median > global_median * (1 + density_threshold):
+                    out[i, :] = global_background
+                else:
+                    out[i, :] = local_percentiles
+            else:
+                # Edge: Always use local (no fallback)
+                out[i, :] = local_percentiles
+        else:
+            # Insufficient pixels
+            if is_near_edge:
+                # Edge: Be conservative, use pixel value
+                out[i, :] = image[y, x]
+            else:
+                # Interior: Use global
+                out[i, :] = global_background
     
     return out
 
@@ -520,10 +583,22 @@ def detect_foci_single_channel(
     bright_to_idx = {b: idx for idx, b in enumerate(unique_brights)}
     
     # Compute local backgrounds
-    local_percentiles_unf = compute_local_percentiles_for_candidates(
-        isolated_img, unf_yx, unique_brights)
-    local_percentiles_filt = compute_local_percentiles_for_candidates(
-        filtered_img, filt_yx, unique_brights)
+    local_percentiles_unf = compute_adaptive_background_expanded_edge(
+        image=isolated_img,
+        coords=unf_yx,
+        unique_percentiles=unique_brights, 
+        nucleus_mask=nucleus_mask  
+    )
+
+ 
+    local_percentiles_filt = compute_adaptive_background_expanded_edge(
+        image=filtered_img, 
+        coords=filt_yx, 
+        unique_percentiles=unique_brights, 
+        nucleus_mask=nucleus_mask,  
+
+    )
+
     
     distances = cdist(unf_yx, filt_yx)
     tolerance = 2
@@ -584,10 +659,20 @@ def detect_foci_single_channel(
     filt_bright_mask = filt_peak_intensities >= min_brightness
     
     # Apply LOCAL BACKGROUND contrast filter
-    unf_local_bg = compute_local_percentiles_for_candidates(
-        isolated_img, coordinates_unfiltered, [best_bright_pct])[:, 0]
-    filt_local_bg = compute_local_percentiles_for_candidates(
-        filtered_img, coordinates_filtered, [best_bright_pct])[:, 0]
+    unf_local_bg = compute_adaptive_background_expanded_edge(
+        image=isolated_img,
+        coords=coordinates_unfiltered,
+        unique_percentiles=[best_bright_pct],
+        nucleus_mask=nucleus_mask, 
+    )[:, 0]
+
+    filt_local_bg = compute_adaptive_background_expanded_edge(
+        image=filtered_img,
+        coords=coordinates_filtered,
+        unique_percentiles=[best_bright_pct],
+        nucleus_mask=nucleus_mask,
+    )[:, 0]
+
     
     unf_contrast_mask = unf_peak_intensities > (unf_local_bg * best_contrast_thresh)
     filt_contrast_mask = filt_peak_intensities > (filt_local_bg * best_contrast_thresh)
@@ -610,20 +695,45 @@ def detect_foci_single_channel(
         return [], {}, None  # ← CHANGED: Added None
 
 
-
-    filtered_img = exposure.rescale_intensity(filtered_img, in_range='image', out_range=(0, 100))
-    # Perform watershed segmentation
-    gradient = filters.sobel(filtered_img) # Using the DoG filtered image to create topographical map for watershed
     
+    # Rescale filtered image intensity to 0-100 range for consistent thresholding
+    filtered_img = exposure.rescale_intensity(filtered_img, in_range='image', out_range=(0, 100))
+    
+    # ========== WATERSHED SEGMENTATION WITH DISTANCE TRANSFORM ==========
+    # This approach combines distance transform with compactness constraints to
+    # segment foci while preventing over-segmentation and edge spillage
+    
+    # Erode nucleus mask to create safety margin from edges
+    # This prevents foci from spilling along nucleus boundaries
+    nucleus_mask_eroded = binary_erosion(nucleus_mask, disk(2))
+    
+    # Create marker array from detected foci coordinates
+    # Each seed gets a unique integer label (1, 2, 3, ...)
+    # Markers serve as starting points for watershed basins
     markers = np.zeros_like(isolated_img, dtype=int)
     for idx, (y, x) in enumerate(final_coords, start=1):
         markers[y, x] = idx
- 
-    # Calculating the threshold for the watershed simulation based on the picture
-    watershed_threshold = water_threshold_percentile
-    watershed_mask = (filtered_img > watershed_threshold) | (markers > 0)
     
-    water_labels = watershed(gradient, markers, mask=watershed_mask)
+    # Define watershed mask combining multiple constraints
+    # Start with pixels above intensity threshold AND within eroded nucleus
+    binary_mask = (filtered_img > water_threshold_percentile) & nucleus_mask_eroded
+    # Then force inclusion of all marker seeds, even if below threshold or in eroded region
+    # This ensures every detected focus gets segmented
+    binary_mask = binary_mask | (markers > 0)
+    
+    # Compute distance transform
+    # Creates smooth "bowl-shaped" basins centered at high-intensity regions
+    # Distance values are higher at region centers, lower at edges
+    # Negative distance is used because watershed finds basins (low points)
+    distance = ndi.distance_transform_edt(binary_mask)
+    
+    # Run watershed segmentation
+    # -distance: inverted distance map (peaks become valleys for watershed)
+    # markers: seed points defining basin centers
+    # mask: limits where watershed can flow
+    # compactness: penalizes irregular shapes, keeps foci compact and circular
+    water_labels = watershed(-distance, markers, mask=binary_mask, compactness=0.005)
+
     
     # Measure each focus
     foci_list = []
@@ -693,7 +803,7 @@ def process_single_nucleus(args):
     watershed_data_list contains dictionaries with watershed labels for each channel
     """
     (cellnumber, masks, channel_images, valid_param_samples, 
-     total_iterations, well_number, position_number, water_threshold_percentile) = args
+     total_iterations, well_number, position_number, water_threshold_percentile_TRITC, water_threshold_percentile_FITC) = args
     
     # Create mask for current nucleus
     masks_reduced = (masks == cellnumber)
@@ -736,7 +846,7 @@ def process_single_nucleus(args):
         nucleus_data.update(intensity_data)
         
         # Detect foci ONLY for TRITC and FITC
-        if channel_name in ["TRITC", "FITC"]:
+        if channel_name in ["TRITC"]:
             foci_list, foci_summary, water_labels = detect_foci_single_channel(  # ← CHANGED: Now gets 3 returns
                 masks_reduced,
                 channel_image_float,
@@ -745,7 +855,39 @@ def process_single_nucleus(args):
                 cellnumber,
                 valid_param_samples,
                 total_iterations,
-                water_threshold_percentile, 
+                water_threshold_percentile_TRITC, 
+                well_number,
+                position_number
+            )
+
+            
+            # Add well and position to each focus
+            for focus in foci_list:
+                focus['Well'] = well_number
+                focus['Position'] = position_number
+            
+            foci_data_list.extend(foci_list)
+            nucleus_data.update(foci_summary)
+            
+            # ← NEW: Store watershed labels if valid
+            if water_labels is not None:
+                watershed_data_list.append({
+                    'cell_id': cellnumber,
+                    'channel': channel_name,
+                    'labels': water_labels,
+                    'mask': masks_reduced  # Include the nucleus mask for proper placement
+                })
+
+        if channel_name in ["FITC"]:
+            foci_list, foci_summary, water_labels = detect_foci_single_channel(  # ← CHANGED: Now gets 3 returns
+                masks_reduced,
+                channel_image_float,
+                channel_image_float,
+                channel_name,
+                cellnumber,
+                valid_param_samples,
+                total_iterations,
+                water_threshold_percentile_FITC, 
                 well_number,
                 position_number
             )
