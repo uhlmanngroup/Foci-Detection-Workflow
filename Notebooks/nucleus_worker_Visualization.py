@@ -246,107 +246,196 @@ def compute_adaptive_background_expanded_edge(image, coords, unique_percentiles,
                                              density_threshold=0.15,
                                              edge_zone_distance=6):
     """
-    ALTERNATIVE APPROACH: Use EXPANDED annulus at edges instead of global fallback.
+    Compute adaptive background estimates for spot/foci detection in microscopy images.
     
-    Strategy:
+    STRATEGY:
+    Uses different annulus sizes for edge vs interior regions to prevent artifacts:
     - Interior: Standard annulus (r=2-6) with global fallback for dense regions
-    - Edges: LARGER annulus (r=2-12) to get more local context, NO global fallback
+    - Edges: LARGER annulus (r=2-12) for more local context, NO global fallback
     
-    This way edges always use local information, preventing artifacts, while
-    interior can still benefit from global fallback for dense foci detection.
+    This prevents edge artifacts (where spots near boundaries get incorrectly flagged)
+    while still detecting dense foci in the interior.
     
     Parameters:
     -----------
+    image : 2D numpy array
+        Grayscale microscopy image (typically fluorescence intensity)
+    coords : Nx2 numpy array
+        Candidate spot coordinates [[y1,x1], [y2,x2], ...] to evaluate
+    unique_percentiles : array-like
+        Percentile values to compute (e.g., [10, 25, 50, 75, 90])
+    nucleus_mask : 2D boolean array, optional
+        Binary mask defining nucleus interior (True=inside nucleus)
+        Used to: 1) Define edge distances, 2) Restrict sampling to nucleus
+    inner_radius : int
+        Inner radius of annulus (excludes central spot, default=2)
+    outer_radius : int
+        Outer radius for interior regions (default=6)
     edge_outer_radius : int
-        Larger outer radius for edge regions (default 12 vs 6 for interior)
+        Larger outer radius for edge regions (default=12)
+    use_global_fallback : bool
+        If True, use global background in dense interior regions (default=True)
+    density_threshold : float
+        Threshold for detecting "dense" regions (default=0.15 = 15% above global)
+    edge_zone_distance : int
+        Distance from edge to be considered "edge region" (default=6 pixels)
+    
+    Returns:
+    --------
+    out : NxP numpy array
+        Background estimates for each coordinate (N) at each percentile (P)
     """
     import numpy as np
     from scipy.ndimage import distance_transform_edt
     
-    N = coords.shape[0]
-    P = len(unique_percentiles)
+    # Initialize output array
+    N = coords.shape[0]  # Number of candidate spots
+    P = len(unique_percentiles)  # Number of percentiles to compute
     out = np.zeros((N, P), dtype=float)
     
-    # Compute edge distance map
+    # ============================================================================
+    # STEP 1: Compute distance from nuclear edge for each pixel
+    # ============================================================================
+    # This tells us which candidates are "near edge" vs "interior"
     edge_distances = None
     if nucleus_mask is not None:
+        # distance_transform_edt computes Euclidean distance to nearest False pixel
+        # Result: pixels near edge have LOW values, interior has HIGH values
         edge_distances = distance_transform_edt(nucleus_mask)
     
-    # Compute global background
+    # ============================================================================
+    # STEP 2: Compute global background statistics (for fallback)
+    # ============================================================================
+    # Global background = percentiles computed across ENTIRE image
+    # Used as fallback when local sampling fails or region is too dense
     global_background = np.percentile(image, unique_percentiles)
-    global_median = np.percentile(image, 50)
+    global_median = np.percentile(image, 50)  # Used to detect dense regions
     
-    # Pre-compute BOTH annulus masks
-    # Standard annulus for interior
-    y_grid, x_grid = np.ogrid[-outer_radius:outer_radius+1, -outer_radius:outer_radius+1]
+    # ============================================================================
+    # STEP 3: Pre-compute STANDARD annulus mask (for interior regions)
+    # ============================================================================
+    # Create coordinate grids centered at origin
+    y_grid, x_grid = np.ogrid[-outer_radius:outer_radius+1, 
+                               -outer_radius:outer_radius+1]
+    
+    # Compute distance of each grid point from center
     distances = np.sqrt(x_grid**2 + y_grid**2)
+    
+    # Define annulus: ring between inner_radius and outer_radius
+    # Example: inner=2, outer=6 means pixels 2-6 pixels away from center
     std_annulus = (distances >= inner_radius) & (distances <= outer_radius)
+    
+    # Get relative coordinates of annulus pixels
     std_y, std_x = np.where(std_annulus)
+    # Shift to center at (0,0) - these are OFFSETS from candidate position
     std_y -= outer_radius
     std_x -= outer_radius
     
-    # Expanded annulus for edges
+    # ============================================================================
+    # STEP 4: Pre-compute EXPANDED annulus mask (for edge regions)
+    # ============================================================================
+    # Same process but with larger outer radius
     y_grid_big, x_grid_big = np.ogrid[-edge_outer_radius:edge_outer_radius+1, 
                                        -edge_outer_radius:edge_outer_radius+1]
     distances_big = np.sqrt(x_grid_big**2 + y_grid_big**2)
+    
+    # Larger annulus: inner=2, outer=12 (twice as large)
+    # This gives more pixels to sample in edge regions where space is limited
     edge_annulus = (distances_big >= inner_radius) & (distances_big <= edge_outer_radius)
+    
     edge_y, edge_x = np.where(edge_annulus)
     edge_y -= edge_outer_radius
     edge_x -= edge_outer_radius
     
-    # Process each candidate
+    # ============================================================================
+    # STEP 5: Process each candidate spot
+    # ============================================================================
     for i, (y, x) in enumerate(coords):
-        # Determine if we're near an edge
+        
+        # ------------------------------------------------------------------------
+        # 5.1: Determine if this candidate is near an edge
+        # ------------------------------------------------------------------------
         is_near_edge = False
         if edge_distances is not None:
+            # Get distance from edge at this coordinate
             dist_from_edge = edge_distances[y, x]
+            # If within edge_zone_distance (default 6) pixels of edge, treat as edge
             is_near_edge = dist_from_edge <= edge_zone_distance
         
-        # Select appropriate annulus
+        # ------------------------------------------------------------------------
+        # 5.2: Select appropriate annulus and parameters based on location
+        # ------------------------------------------------------------------------
         if is_near_edge:
+            # EDGE REGION: Use expanded annulus
             annulus_y, annulus_x = edge_y, edge_x
-            min_pixels = 15  # Need more pixels for larger annulus
-            use_fallback = False  # CRITICAL: No global fallback at edges
+            min_pixels = 15  # Need more valid pixels (larger annulus has more)
+            use_fallback = False  # CRITICAL: Never use global at edges!
+                                  # This prevents false positives at boundaries
         else:
+            # INTERIOR REGION: Use standard annulus
             annulus_y, annulus_x = std_y, std_x
-            min_pixels = 5
-            use_fallback = use_global_fallback
+            min_pixels = 5  # Fewer pixels needed for smaller annulus
+            use_fallback = use_global_fallback  # Can use global for dense regions
         
-        # Compute absolute positions
-        abs_y = y + annulus_y
-        abs_x = x + annulus_x
+        # ------------------------------------------------------------------------
+        # 5.3: Convert relative offsets to absolute image coordinates
+        # ------------------------------------------------------------------------
+        abs_y = y + annulus_y  # Add offsets to candidate y-coordinate
+        abs_x = x + annulus_x  # Add offsets to candidate x-coordinate
         
-        # Filter for image bounds
+        # ------------------------------------------------------------------------
+        # 5.4: Filter annulus pixels to keep only VALID samples
+        # ------------------------------------------------------------------------
+        # Check 1: Must be within image boundaries
         valid = (abs_y >= 0) & (abs_y < image.shape[0]) & \
                 (abs_x >= 0) & (abs_x < image.shape[1])
         
-        # Filter for nucleus interior
+        # Check 2: Must be inside nucleus (if mask provided)
         if nucleus_mask is not None:
+            # Only check pixels that passed boundary check
             valid_indices = np.where(valid)[0]
+            # Sample mask at valid positions - keep only pixels inside nucleus
             nucleus_valid = nucleus_mask[abs_y[valid_indices], abs_x[valid_indices]] > 0
             valid[valid_indices] = nucleus_valid
         
+        # ------------------------------------------------------------------------
+        # 5.5: Compute background if we have enough valid pixels
+        # ------------------------------------------------------------------------
         if valid.sum() >= min_pixels:
+            # Extract pixel intensities from annulus
             annulus_pixels = image[abs_y[valid], abs_x[valid]]
+            
+            # Compute requested percentiles from local annulus
             local_percentiles = np.percentile(annulus_pixels, unique_percentiles)
             
+            # Decide whether to use local or global background
             if use_fallback:
-                # Interior: Check for dense regions
+                # INTERIOR WITH FALLBACK: Check if region is dense with foci
                 local_median = np.percentile(annulus_pixels, 50)
+                
+                # If local median is >15% higher than global, it's a "dense" region
+                # Dense regions likely contain many foci, so local background is biased high
+                # Use global background instead to avoid missing foci
                 if local_median > global_median * (1 + density_threshold):
-                    out[i, :] = global_background
+                    out[i, :] = global_background  # Use global
                 else:
-                    out[i, :] = local_percentiles
+                    out[i, :] = local_percentiles  # Use local
             else:
-                # Edge: Always use local (no fallback)
+                # EDGE REGION: Always use local percentiles
+                # This prevents edge artifacts from global contamination
                 out[i, :] = local_percentiles
+        
         else:
-            # Insufficient pixels
+            # ------------------------------------------------------------------------
+            # 5.6: Handle insufficient valid pixels (fallback strategies)
+            # ------------------------------------------------------------------------
+            # Not enough pixels to reliably estimate background
             if is_near_edge:
-                # Edge: Be conservative, use pixel value
+                # EDGE: Be conservative - use the pixel's own intensity
+                # This prevents false positives at boundaries where sampling is hard
                 out[i, :] = image[y, x]
             else:
-                # Interior: Use global
+                # INTERIOR: Safe to use global background
                 out[i, :] = global_background
     
     return out
