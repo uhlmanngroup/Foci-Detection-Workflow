@@ -17,7 +17,7 @@ import skimage as ski
 import os
 from PIL import Image
 from skimage.morphology import binary_erosion, disk
-
+from scipy.ndimage import distance_transform_edt, label
 
 # ===============================================================
 # HELPER FUNCTIONS (module-level for multiprocessing)
@@ -238,6 +238,11 @@ def compute_circularity(area, perimeter):
     return min(circularity, 1.0)
 
 
+
+# ===============================================================
+# TEXTURE-AWARE BACKGROUND WITH NUCLEUS FALLBACK
+# ===============================================================
+
 def compute_adaptive_background_texture_nucleus_fallback(
     image, coords, unique_percentiles, 
     nucleus_mask=None,
@@ -256,66 +261,20 @@ def compute_adaptive_background_texture_nucleus_fallback(
     1. Dense regions fall back to PER-NUCLEUS background (not global)
     2. Computes texture metrics (CV, variance) for each nucleus
     3. Returns texture info so researchers can filter post-hoc
-    
-    WORKFLOW:
-    - Detects dense region around each candidate (local median > nucleus median)
-    - If dense: uses NUCLEUS background (handles uniformly bright nuclei)
-    - If not dense: uses LOCAL annulus background
-    - Edges: always use expanded local annulus
-    
-    Parameters:
-    -----------
-    image : 2D numpy array
-        Grayscale microscopy image
-    coords : Nx2 numpy array  
-        Candidate spot coordinates [[y1,x1], [y2,x2], ...]
-    unique_percentiles : array-like
-        Percentile values to compute (e.g., [25, 50, 75])
-    nucleus_mask : 2D boolean array, optional
-        Binary mask defining nucleus interior
-    nucleus_labels : 2D int array, optional
-        Labeled mask where each nucleus has unique integer ID
-    inner_radius : int
-        Inner radius of annulus (default=2)
-    outer_radius : int  
-        Outer radius for interior regions (default=6)
-    edge_outer_radius : int
-        Larger outer radius for edge regions (default=12)
-    density_threshold : float
-        Local median must be this much above nucleus median to trigger
-        dense mode (default=0.15 = 15%)
-    edge_zone_distance : int
-        Distance from edge to be considered "edge region" (default=6)
-    return_texture_info : bool
-        If True, also return dictionary with nucleus texture metrics
-        
-    Returns:
-    --------
-    backgrounds : NxP numpy array
-        Background estimates for each coordinate at each percentile
-    texture_info : dict (only if return_texture_info=True)
-        Dictionary with keys:
-        - 'nucleus_stats': dict mapping nucleus_id -> {mean, std, cv, median, ...}
-        - 'coord_nucleus_ids': array of nucleus IDs for each coordinate
-        - 'coord_texture_flags': array of bools indicating if nucleus is "spotty"
     """
     
     N = coords.shape[0]
     P = len(unique_percentiles)
     backgrounds = np.zeros((N, P), dtype=float)
     
-    # ============================================================================
-    # STEP 1: Compute edge distances
-    # ============================================================================
+    # Compute edge distances
     edge_distances = None
     if nucleus_mask is not None:
         edge_distances = distance_transform_edt(nucleus_mask)
     
-    # ============================================================================
-    # STEP 2: Compute per-nucleus backgrounds AND texture metrics
-    # ============================================================================
-    nucleus_backgrounds = {}  # nucleus_id -> background percentiles
-    nucleus_stats = {}        # nucleus_id -> {mean, std, cv, median, ...}
+    # Compute per-nucleus backgrounds AND texture metrics
+    nucleus_backgrounds = {}  
+    nucleus_stats = {}
     
     if nucleus_mask is not None:
         # Get labeled nuclei if not provided
@@ -323,6 +282,11 @@ def compute_adaptive_background_texture_nucleus_fallback(
             nucleus_labels, num_nuclei = label(nucleus_mask)
         else:
             num_nuclei = int(nucleus_labels.max())
+        
+        # Single nucleus case - treat the whole mask as one nucleus
+        if num_nuclei == 0 and nucleus_mask.any():
+            nucleus_labels = nucleus_mask.astype(int)
+            num_nuclei = 1
         
         # Compute statistics for each nucleus
         for nuc_id in range(1, num_nuclei + 1):
@@ -338,12 +302,9 @@ def compute_adaptive_background_texture_nucleus_fallback(
             median_intensity = np.median(nuc_pixels)
             
             # Coefficient of Variation (CV) = std/mean
-            # HIGH CV (>0.3) = spotty/variable = likely has foci
-            # LOW CV (<0.2) = uniform = likely just bright baseline
             cv = std_intensity / mean_intensity if mean_intensity > 0 else 0
             
             # Additional texture metrics
-            # Percentile range: difference between high and low percentiles
             p10 = np.percentile(nuc_pixels, 10)
             p90 = np.percentile(nuc_pixels, 90)
             percentile_range = p90 - p10
@@ -356,20 +317,16 @@ def compute_adaptive_background_texture_nucleus_fallback(
                 'mean': mean_intensity,
                 'median': median_intensity,
                 'std': std_intensity,
-                'cv': cv,  # Coefficient of variation
+                'cv': cv,
                 'p10': p10,
                 'p90': p90,
                 'percentile_range': percentile_range,
                 'num_pixels': len(nuc_pixels),
-                # Flag for post-hoc filtering
-                'is_spotty': cv > 0.25,  # Can adjust this threshold
-                'is_uniform': cv < 0.15   # Very uniform (suspiciously bright?)
+                'is_spotty': cv > 0.25,  # Can adjust threshold
+                'is_uniform': cv < 0.15   # Very uniform
             }
     
-    # ============================================================================
-    # STEP 3: Pre-compute annulus masks
-    # ============================================================================
-    # Standard annulus for interior regions
+    # Pre-compute annulus masks
     y_grid, x_grid = np.ogrid[-outer_radius:outer_radius+1, -outer_radius:outer_radius+1]
     distances = np.sqrt(x_grid**2 + y_grid**2)
     std_annulus = (distances >= inner_radius) & (distances <= outer_radius)
@@ -386,50 +343,35 @@ def compute_adaptive_background_texture_nucleus_fallback(
     edge_y -= edge_outer_radius
     edge_x -= edge_outer_radius
     
-    # ============================================================================
-    # STEP 4: Process each candidate coordinate
-    # ============================================================================
-    coord_nucleus_ids = np.zeros(N, dtype=int)  # Track which nucleus each coord is in
+    # Process each candidate coordinate
+    coord_nucleus_ids = np.zeros(N, dtype=int)
     
     for i, (y, x) in enumerate(coords):
-        
-        # ------------------------------------------------------------------------
-        # 4.1: Determine if near edge
-        # ------------------------------------------------------------------------
+        # Determine if near edge
         is_near_edge = False
         if edge_distances is not None:
             dist_from_edge = edge_distances[y, x]
             is_near_edge = dist_from_edge <= edge_zone_distance
         
-        # ------------------------------------------------------------------------
-        # 4.2: Get nucleus ID for this coordinate
-        # ------------------------------------------------------------------------
+        # Get nucleus ID for this coordinate
         nuc_id = 0
         if nucleus_labels is not None:
             nuc_id = int(nucleus_labels[y, x])
         coord_nucleus_ids[i] = nuc_id
         
-        # ------------------------------------------------------------------------
-        # 4.3: Select appropriate annulus based on location
-        # ------------------------------------------------------------------------
+        # Select appropriate annulus
         if is_near_edge:
-            # Edge: use expanded annulus
             annulus_y, annulus_x = edge_y, edge_x
             min_pixels = 15
         else:
-            # Interior: use standard annulus
             annulus_y, annulus_x = std_y, std_x
             min_pixels = 5
         
-        # ------------------------------------------------------------------------
-        # 4.4: Compute absolute pixel positions
-        # ------------------------------------------------------------------------
+        # Compute absolute pixel positions
         abs_y = y + annulus_y
         abs_x = x + annulus_x
         
-        # ------------------------------------------------------------------------
-        # 4.5: Filter for valid pixels (in bounds + in nucleus)
-        # ------------------------------------------------------------------------
+        # Filter for valid pixels
         valid = (abs_y >= 0) & (abs_y < image.shape[0]) & \
                 (abs_x >= 0) & (abs_x < image.shape[1])
         
@@ -438,51 +380,35 @@ def compute_adaptive_background_texture_nucleus_fallback(
             nucleus_valid = nucleus_mask[abs_y[valid_indices], abs_x[valid_indices]] > 0
             valid[valid_indices] = nucleus_valid
         
-        # ------------------------------------------------------------------------
-        # 4.6: Compute background with nucleus-aware fallback
-        # ------------------------------------------------------------------------
+        # Compute background with nucleus-aware fallback
         if valid.sum() >= min_pixels:
-            # Extract annulus pixels
             annulus_pixels = image[abs_y[valid], abs_x[valid]]
             local_percentiles = np.percentile(annulus_pixels, unique_percentiles)
             
             if not is_near_edge and nuc_id > 0 and nuc_id in nucleus_stats:
-                # INTERIOR with valid nucleus: Check for dense region
-                
-                # Compute local median from annulus
+                # Check for dense region
                 local_median = np.median(annulus_pixels)
-                
-                # Get nucleus median for comparison
                 nucleus_median = nucleus_stats[nuc_id]['median']
                 
-                # Dense detection: local median significantly above nucleus median
-                # This means we're in a region that's brighter than the nucleus baseline
+                # Dense detection
                 is_dense = local_median > nucleus_median * (1 + density_threshold)
                 
                 if is_dense:
-                    # Dense region detected: use NUCLEUS background
-                    # This prevents false positives in uniformly bright nuclei
-                    # AND correctly handles truly dense foci regions
+                    # Use NUCLEUS background for dense regions
                     backgrounds[i, :] = nucleus_backgrounds[nuc_id]
                 else:
-                    # Normal region: use LOCAL annulus background
+                    # Use LOCAL annulus background
                     backgrounds[i, :] = local_percentiles
             else:
-                # Edge region or no nucleus info: always use local
+                # Edge region or no nucleus info: use local
                 backgrounds[i, :] = local_percentiles
-        
         else:
             # Insufficient valid pixels: use fallback
             if nuc_id > 0 and nuc_id in nucleus_backgrounds:
-                # Have nucleus info: use nucleus background
                 backgrounds[i, :] = nucleus_backgrounds[nuc_id]
             else:
-                # No nucleus info: use pixel's own value (conservative)
                 backgrounds[i, :] = image[y, x]
     
-    # ============================================================================
-    # STEP 5: Return results with optional texture info
-    # ============================================================================
     if return_texture_info:
         texture_info = {
             'nucleus_stats': nucleus_stats,
@@ -827,21 +753,56 @@ def detect_foci_single_channel(
     bright_to_idx = {b: idx for idx, b in enumerate(unique_brights)}
     
     # Compute local backgrounds
-    local_percentiles_unf = compute_adaptive_background_expanded_edge(
-        image=isolated_img,
-        coords=unf_yx,
-        unique_percentiles=unique_brights, 
-        nucleus_mask=nucleus_mask  
-    )
-
- 
-    local_percentiles_filt = compute_adaptive_background_expanded_edge(
-        image=filtered_img, 
-        coords=filt_yx, 
-        unique_percentiles=unique_brights, 
-        nucleus_mask=nucleus_mask,  
-
-    )
+    use_texture_filtering = True  # Enable texture-aware filtering
+    min_cv_threshold = 0.20  # Nuclei with CV below this are "uniform"
+    
+    if use_texture_filtering:
+        # Use texture-aware backgrounds
+        local_percentiles_unf, texture_info_unf = compute_adaptive_background_texture_nucleus_fallback(
+            image=isolated_img,
+            coords=unf_yx,
+            unique_percentiles=unique_brights, 
+            nucleus_mask=nucleus_mask,
+            return_texture_info=True  # GET TEXTURE INFO
+        )
+        
+        local_percentiles_filt, texture_info_filt = compute_adaptive_background_texture_nucleus_fallback(
+            image=filtered_img, 
+            coords=filt_yx, 
+            unique_percentiles=unique_brights, 
+            nucleus_mask=nucleus_mask,
+            return_texture_info=True  # GET TEXTURE INFO
+        )
+        
+        # Check if nucleus is uniform (likely false positives)
+        nucleus_is_uniform = False
+        contrast_multiplier = 1.0
+        
+        if texture_info_unf['nucleus_stats']:
+            stats = list(texture_info_unf['nucleus_stats'].values())[0]
+            nucleus_cv = stats['cv']
+            
+            if nucleus_cv < min_cv_threshold:
+                print(f"    ⚠️ Cell {cell_id}: Low texture (CV={nucleus_cv:.3f}) - applying stricter filters")
+                nucleus_is_uniform = True
+                contrast_multiplier = 1.5  # Require 50% higher contrast for uniform nuclei
+    else:
+        # Fallback to original method
+        local_percentiles_unf = compute_adaptive_background_expanded_edge(
+            image=isolated_img,
+            coords=unf_yx,
+            unique_percentiles=unique_brights, 
+            nucleus_mask=nucleus_mask  
+        )
+        
+        local_percentiles_filt = compute_adaptive_background_expanded_edge(
+            image=filtered_img, 
+            coords=filt_yx, 
+            unique_percentiles=unique_brights, 
+            nucleus_mask=nucleus_mask,
+        )
+        nucleus_is_uniform = False
+        contrast_multiplier = 1.0
 
     
     distances = cdist(unf_yx, filt_yx)
@@ -852,8 +813,13 @@ def detect_foci_single_channel(
     all_detected_foci = []
     
     for p_idx in range(len(valid_param_samples)):
+        # Adjust contrast threshold for uniform nuclei
+        adjusted_contrast_threshs = contrast_threshs.copy()
+        if nucleus_is_uniform:
+            adjusted_contrast_threshs = contrast_threshs * contrast_multiplier
+        
         confirmed_coords, count = apply_foci_filters(
-            p_idx, bright_pcts, contrast_threshs, percentile_vals,
+            p_idx, bright_pcts, adjusted_contrast_threshs, percentile_vals,
             min_brightness_per_param, bright_to_idx,
             unf_intensities, filt_intensities,
             local_percentiles_unf, local_percentiles_filt,
