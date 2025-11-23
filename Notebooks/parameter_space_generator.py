@@ -18,6 +18,14 @@ from collections import Counter
 from mpl_toolkits.mplot3d import Axes3D
 
 
+
+from nucleus_worker_Visualization import (
+    compute_adaptive_background_texture_nucleus_fallback,
+    apply_foci_filters
+)
+
+
+
 class ParameterSpaceGenerator:
     """
     Full implementation with actual foci detection and comprehensive visualizations.
@@ -84,8 +92,13 @@ class ParameterSpaceGenerator:
                 nucleus_id = np.random.choice(remaining)
             
             # Show the nucleus
+            #self._visualize_single_nucleus(masks, channel_image, nucleus_id)
+
+            # ✅ SHOW WITH NON-BLOCKING DISPLAY
             self._visualize_single_nucleus(masks, channel_image, nucleus_id)
-            
+            plt.show(block=False)  # Non-blocking
+            plt.pause(0.1)  # Let it render
+                
             # Get user input
             while True:
                 user_input = input(f"\n🎯 Nucleus {nucleus_id} - Enter foci count, 'skip', 'select', or 'done': ").strip()
@@ -219,11 +232,10 @@ class ParameterSpaceGenerator:
         
         return self.grid_results
     
-    def _detect_foci_for_nucleus(self, nucleus_mask, channel_image, original_image,
-                                 bright_grid, contrast_grid, percentile_grid, cell_id):
+    def _detect_foci_for_nucleus(self, nucleus_mask, channel_image, original_image, bright_grid, contrast_grid, percentile_grid, cell_id):
         """
         Run actual foci detection for one nucleus across all parameters.
-        This implements the same detection algorithm as your main code.
+        NOW USES THE SAME DETECTION PIPELINE AS MAIN PROGRAM.
         """
         # Isolate nucleus
         isolated_img = img_as_float(channel_image.copy())
@@ -232,7 +244,7 @@ class ParameterSpaceGenerator:
         if isolated_img.max() == 0:
             return []
         
-        # Apply DoG filter
+        # Apply DoG filter (same as main program)
         filtered_img = filters.difference_of_gaussians(isolated_img, low_sigma=1, high_sigma=2)
         filtered_img = np.clip(filtered_img, 0, None)
         filtered_img = exposure.rescale_intensity(filtered_img, in_range='image', 
@@ -243,122 +255,83 @@ class ParameterSpaceGenerator:
         if pos_pixels.size == 0:
             return []
         
-        results = []
-
+        # Prepare parameter arrays
+        bright_grid_arr = np.array(bright_grid)
+        contrast_grid_arr = np.array(contrast_grid)
+        percentile_grid_arr = np.array(percentile_grid)
         
-        # Test each parameter combination
-        for bright_pct in bright_grid:
-            for contrast_thresh in contrast_grid:
-                for percentile_val in percentile_grid:
-                    
-                    # Calculate minimum brightness
-                    min_brightness = np.percentile(pos_pixels, percentile_val)
-                    
-                    # Find candidates
-                    candidates_filtered = peak_local_max(filtered_img, min_distance=2, 
-                                                        threshold_abs=min_brightness)
-                    candidates_unfiltered = peak_local_max(isolated_img, min_distance=2, 
-                                                          threshold_abs=min_brightness)
-                    
-                    if len(candidates_filtered) == 0 or len(candidates_unfiltered) == 0:
-                        foci_count = 0
-                    else:
-                        # Apply detection logic
-                        foci_count = self._apply_detection_logic(
-                            isolated_img, filtered_img,
-                            candidates_unfiltered, candidates_filtered,
-                            bright_pct, contrast_thresh, min_brightness,
-                            nucleus_mask
-                        )
-                    
-                    results.append({
-                        'cell_num': cell_id,
-                        'bright_pct': bright_pct,
-                        'contrast_thresh': contrast_thresh,
-                        'percentile_val': percentile_val,
-                        'foci_count': foci_count
-                    })
+        # Compute minimum brightness thresholds
+        min_brightness_per_param = np.percentile(pos_pixels, percentile_grid_arr)
+        global_min_brightness = np.min(min_brightness_per_param)
+        
+        # Find candidates (same as main program)
+        candidates_filtered = peak_local_max(filtered_img, min_distance=2, 
+                                            threshold_abs=global_min_brightness)
+        candidates_unfiltered = peak_local_max(isolated_img, min_distance=2, 
+                                              threshold_abs=global_min_brightness)
+        
+        if len(candidates_filtered) == 0 or len(candidates_unfiltered) == 0:
+            return []
+        
+        # Extract intensities
+        unf_intensities = isolated_img[candidates_unfiltered[:, 0], candidates_unfiltered[:, 1]]
+        filt_intensities = filtered_img[candidates_filtered[:, 0], candidates_filtered[:, 1]]
+        
+        # ✅ USE REAL BACKGROUND CALCULATION FROM MAIN PROGRAM
+        unique_brights = np.unique(np.round(bright_grid_arr, 6))
+        bright_to_idx = {b: idx for idx, b in enumerate(unique_brights)}
+        
+        local_percentiles_unf, texture_info_unf = compute_adaptive_background_texture_nucleus_fallback(
+            image=isolated_img,
+            coords=candidates_unfiltered,
+            unique_percentiles=unique_brights,
+            nucleus_mask=nucleus_mask,
+            return_texture_info=True
+        )
+        
+        local_percentiles_filt, _ = compute_adaptive_background_texture_nucleus_fallback(
+            image=filtered_img,
+            coords=candidates_filtered,
+            unique_percentiles=unique_brights,
+            nucleus_mask=nucleus_mask,
+        )
+        
+        # ✅ CHECK FOR UNIFORM NUCLEI (same as main program)
+        contrast_multiplier = 1.0
+        if texture_info_unf['nucleus_stats']:
+            stats = list(texture_info_unf['nucleus_stats'].values())[0]
+            nucleus_cv = stats['cv']
+            if nucleus_cv < 0.20:  # Same threshold as main program
+                print(f"    ⚠️ Nucleus {cell_id}: Low texture (CV={nucleus_cv:.3f}) - applying stricter filters")
+                contrast_multiplier = 1.5
+                contrast_grid_arr = contrast_grid_arr * contrast_multiplier
+        
+        # Compute distances for matching
+        distances = cdist(candidates_unfiltered, candidates_filtered)
+        
+        results = []
+        
+        # ✅ USE VECTORIZED FILTERING FROM MAIN PROGRAM
+        for p_idx in range(len(bright_grid)):
+            confirmed_coords, count = apply_foci_filters(
+                p_idx, bright_grid_arr, contrast_grid_arr, percentile_grid_arr,
+                min_brightness_per_param, bright_to_idx,
+                unf_intensities, filt_intensities,
+                local_percentiles_unf, local_percentiles_filt,
+                distances, candidates_unfiltered, tolerance=2
+            )
+            
+            results.append({
+                'cell_num': cell_id,
+                'bright_pct': bright_grid[p_idx],
+                'contrast_thresh': contrast_grid[p_idx],
+                'percentile_val': percentile_grid[p_idx],
+                'foci_count': count
+            })
         
         return results
     
-    def _apply_detection_logic(self, isolated_img, filtered_img, 
-                              unf_coords, filt_coords,
-                              bright_pct, contrast_thresh, min_brightness,
-                              nucleus_mask):
-        """
-        Apply the actual foci detection logic from your main code.
-        """
-        # Extract intensities
-        unf_intensities = isolated_img[unf_coords[:, 0], unf_coords[:, 1]]
-        filt_intensities = filtered_img[filt_coords[:, 0], filt_coords[:, 1]]
-        
-        # Apply absolute brightness filter
-        unf_bright_mask = unf_intensities >= min_brightness
-        filt_bright_mask = filt_intensities >= min_brightness
-        
-        # Compute local backgrounds (simplified version)
-        unf_local_bg = self._compute_local_background(
-            isolated_img, unf_coords, bright_pct, nucleus_mask
-        )
-        filt_local_bg = self._compute_local_background(
-            filtered_img, filt_coords, bright_pct, nucleus_mask
-        )
-        
-        # Apply contrast filter
-        unf_contrast_mask = unf_intensities > (unf_local_bg * contrast_thresh)
-        filt_contrast_mask = filt_intensities > (filt_local_bg * contrast_thresh)
-        
-        # Combine filters
-        unf_final = unf_coords[unf_bright_mask & unf_contrast_mask]
-        filt_final = filt_coords[filt_bright_mask & filt_contrast_mask]
-        
-        if len(unf_final) == 0 or len(filt_final) == 0:
-            return 0
-        
-        # Match with tolerance
-        distances = cdist(unf_final, filt_final)
-        if distances.size > 0:
-            nearest_dist = np.min(distances, axis=1)
-            confirmed = unf_final[nearest_dist <= 2]  # 2 pixel tolerance
-            return len(confirmed)
-        
-        return 0
-    
-    def _compute_local_background(self, image, coords, percentile, nucleus_mask,
-                                 inner_radius=2, outer_radius=6):
-        """Simplified local background calculation."""
-        backgrounds = np.zeros(len(coords))
-        
-        # Create annulus mask
-        y_grid, x_grid = np.ogrid[-outer_radius:outer_radius+1, -outer_radius:outer_radius+1]
-        distances = np.sqrt(x_grid**2 + y_grid**2)
-        annulus = (distances >= inner_radius) & (distances <= outer_radius)
-        annulus_y, annulus_x = np.where(annulus)
-        annulus_y -= outer_radius
-        annulus_x -= outer_radius
-        
-        for i, (y, x) in enumerate(coords):
-            abs_y = y + annulus_y
-            abs_x = x + annulus_x
-            
-            # Check bounds
-            valid = (abs_y >= 0) & (abs_y < image.shape[0]) & \
-                    (abs_x >= 0) & (abs_x < image.shape[1])
-            
-            # Check nucleus mask
-            if nucleus_mask is not None and valid.sum() > 0:
-                valid_indices = np.where(valid)[0]
-                nucleus_valid = nucleus_mask[abs_y[valid_indices], abs_x[valid_indices]]
-                valid[valid_indices] = nucleus_valid
-            
-            if valid.sum() >= 5:
-                annulus_pixels = image[abs_y[valid], abs_x[valid]]
-                backgrounds[i] = np.percentile(annulus_pixels, percentile)
-            else:
-                backgrounds[i] = image[y, x]
-        
-        return backgrounds
-    
+
     def find_valid_intersection(self):
         """
         Find parameter combinations valid for ALL registered nuclei.
