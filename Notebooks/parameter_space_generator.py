@@ -46,21 +46,22 @@ class ParameterSpaceGenerator:
         self.ground_truth_nuclei[cell_id] = expected_count
         print(f"✓ Added nucleus {cell_id} with expected count: {expected_count}")
     
-    def interactive_nucleus_selection(self, masks, channel_image, num_nuclei=4):
+    def interactive_nucleus_selection(self, masks, channel_image, num_nuclei=10):
         """
         Interactively select and annotate nuclei with visual feedback.
+        Streamlined workflow with minimal scrolling.
         """
         from skimage.segmentation import find_boundaries
         
         print("\n" + "="*60)
         print("INTERACTIVE VISUAL NUCLEUS SELECTION")
         print("="*60)
-        print(f"\nGoal: Select and annotate {num_nuclei} nuclei")
-        print("\nInstructions:")
-        print("  - View each suggested nucleus")
-        print("  - Enter foci count or 'skip' to see another")
-        print("  - Enter 'select' to manually choose a nucleus by ID")
-        print("  - Enter 'done' when finished")
+        print(f"\nGoal: Select and annotate up to {num_nuclei} nuclei")
+        print("\nWorkflow:")
+        print("  1. View full overview with all nucleus IDs")
+        print("  2. Select a nucleus by entering its ID")
+        print("  3. View detailed zoom of that nucleus")
+        print("  4. Enter foci count or choose different nucleus")
         print("="*60)
         
         channel_image = img_as_float(channel_image)
@@ -68,88 +69,94 @@ class ParameterSpaceGenerator:
         # Get all valid nucleus IDs
         all_nucleus_ids = np.unique(masks)[1:]  # Skip background
         
-        # Get diversity suggestions
-        suggested_ids = self._get_diverse_nuclei(masks, channel_image, n_suggest=20)
-        
         selected_count = 0
         used_ids = set()
-        current_idx = 0
+        
+        # ✅ STEP 1: Show full overview at the start
+        print("\n📊 Showing full overview of all nuclei...")
+        self._show_all_nuclei_overview(masks, channel_image, used_ids)
         
         while selected_count < num_nuclei:
             print(f"\n[{selected_count}/{num_nuclei} nuclei selected]")
             
-            # Get next nucleus to show
-            if current_idx < len(suggested_ids):
-                nucleus_id = suggested_ids[current_idx]
-                if nucleus_id in used_ids:
-                    current_idx += 1
-                    continue
-            else:
-                remaining = [nid for nid in all_nucleus_ids if nid not in used_ids]
-                if not remaining:
-                    print("No more nuclei available!")
-                    break
-                nucleus_id = np.random.choice(remaining)
-            
-            # Show the nucleus
-            #self._visualize_single_nucleus(masks, channel_image, nucleus_id)
-
-            # ✅ SHOW WITH NON-BLOCKING DISPLAY
-            self._visualize_single_nucleus(masks, channel_image, nucleus_id)
-            plt.show(block=False)  # Non-blocking
-            plt.pause(0.1)  # Let it render
-                
-            # Get user input
+            # ✅ STEP 2: Choose a nucleus to examine
             while True:
-                user_input = input(f"\n🎯 Nucleus {nucleus_id} - Enter foci count, 'skip', 'select', or 'done': ").strip()
+                nucleus_input = input("\n🔍 Enter nucleus ID to examine (or 'generate' to show overview, 'done' to finish): ").strip()
                 
-                if user_input.lower() == 'done':
+                if nucleus_input.lower() == 'done':
                     if selected_count > 0:
                         print(f"\n✓ Finished with {selected_count} nuclei")
                         plt.close('all')
                         return list(self.ground_truth_nuclei.keys())
                     else:
-                        print("Please select at least one nucleus first!")
+                        print("❌ Please select at least one nucleus first!")
                         continue
                 
-                elif user_input.lower() == 'skip':
-                    print("→ Skipping to next nucleus...")
-                    current_idx += 1
-                    plt.close('all')
-                    break
-                
-                elif user_input.lower() == 'select':
+                elif nucleus_input.lower() == 'generate':
+                    print("\n📊 Regenerating full overview...")
                     plt.close('all')
                     self._show_all_nuclei_overview(masks, channel_image, used_ids)
-                    manual_id = input("\nEnter nucleus ID to examine: ").strip()
-                    try:
-                        nucleus_id = int(manual_id)
-                        if nucleus_id not in all_nucleus_ids:
-                            print(f"❌ Nucleus {nucleus_id} not found")
-                            continue
-                        plt.close('all')
-                        self._visualize_single_nucleus(masks, channel_image, nucleus_id)
-                        continue
-                    except ValueError:
-                        print("❌ Invalid ID")
-                        continue
+                    continue
                 
                 else:
                     try:
-                        foci_count = int(user_input)
+                        nucleus_id = int(nucleus_input)
+                        if nucleus_id not in all_nucleus_ids:
+                            print(f"❌ Nucleus {nucleus_id} not found. Try again or enter 'generate' to see overview.")
+                            continue
+                        # Valid nucleus ID - break to show detailed view
+                        break
+                    except ValueError:
+                        print("❌ Invalid input. Enter a number, 'generate', or 'done'.")
+                        continue
+            
+            # ✅ STEP 3: Show detailed view of selected nucleus
+            plt.close('all')
+            self._visualize_single_nucleus(masks, channel_image, nucleus_id)
+            plt.show(block=False)
+            plt.pause(0.1)
+            
+            # ✅ STEP 4: Count foci or abort
+            while True:
+                action_input = input(f"\n🎯 Nucleus {nucleus_id} - Enter foci count, 'abort' (choose different), or 'abort+' (regenerate overview): ").strip()
+                
+                if action_input.lower() == 'abort':
+                    # Abort without regenerating - go back to nucleus selection
+                    print("→ Aborting to nucleus selection...")
+                    plt.close('all')
+                    break  # Break inner loop, stay in outer loop
+                
+                elif action_input.lower() == 'abort+':
+                    # Abort and regenerate overview
+                    print("→ Aborting and regenerating overview...")
+                    plt.close('all')
+                    self._show_all_nuclei_overview(masks, channel_image, used_ids)
+                    break  # Break inner loop, stay in outer loop
+                
+                else:
+                    try:
+                        foci_count = int(action_input)
                         if foci_count < 0:
                             print("❌ Count must be non-negative")
                             continue
                         
+                        # ✅ Valid foci count - save it
                         self.add_nucleus(nucleus_id, foci_count)
                         used_ids.add(nucleus_id)
                         selected_count += 1
-                        current_idx += 1
                         plt.close('all')
-                        break
+                        
+                        # Check if we're done
+                        if selected_count >= num_nuclei:
+                            print(f"\n✅ Completed! Selected {selected_count} nuclei.")
+                            return list(self.ground_truth_nuclei.keys())
+                        
+                        # Not done - prompt for next nucleus without regenerating
+                        print(f"✓ Saved! ({selected_count}/{num_nuclei} complete)")
+                        break  # Break inner loop to select next nucleus
                         
                     except ValueError:
-                        print("❌ Invalid input")
+                        print("❌ Invalid input. Enter a number, 'abort', or 'abort+'.")
                         continue
         
         plt.close('all')
@@ -168,32 +175,48 @@ class ParameterSpaceGenerator:
             raise ValueError("No nuclei registered! Use add_nucleus() first.")
          
         # number of sampled values per parameter
-        n_bright = 5
-        n_contrast = 5
-        n_percentile = 5
+        n_bright = 31
+        n_contrast = 15
+        n_percentile = 31
         
-        bright_grid = np.linspace(
+        # ✅ Step 1: Create 1D arrays of parameter values (no dtype=int!)
+        bright_vals = np.linspace(
             self.param_ranges['bright_pct'][0],
             self.param_ranges['bright_pct'][1],
             n_bright,
             dtype=int
         )
         
-        contrast_grid = np.linspace(
+        contrast_vals = np.linspace(
             self.param_ranges['contrast_thresh'][0],
             self.param_ranges['contrast_thresh'][1],
             n_contrast,
             dtype=int
         )
         
-        percentile_grid = np.linspace(
+        percentile_vals = np.linspace(
             self.param_ranges['percentile_val'][0],
             self.param_ranges['percentile_val'][1],
             n_percentile,
             dtype=int
         )
         
-        total_combinations = len(bright_grid) * len(contrast_grid) * len(percentile_grid)
+        # ✅ Step 2: Create meshgrid to generate ALL combinations
+        bright_mesh, contrast_mesh, percentile_mesh = np.meshgrid(
+            bright_vals, contrast_vals, percentile_vals, indexing='ij'
+        )
+        
+        # ✅ Step 3: Flatten meshgrid to get 1D arrays of all 125 combinations
+        bright_grid = bright_mesh.flatten()      # Shape: (125,)
+        contrast_grid = contrast_mesh.flatten()  # Shape: (125,)
+        percentile_grid = percentile_mesh.flatten()  # Shape: (125,)
+        
+        total_combinations = len(bright_grid)  # Now correctly 125
+        print(f"\nTesting {total_combinations} parameter combinations")
+        print(f"On {len(self.ground_truth_nuclei)} nuclei")
+        print(f"  Bright %: {n_bright} values from {bright_vals.min():.1f} to {bright_vals.max():.1f}")
+        print(f"  Contrast: {n_contrast} values from {contrast_vals.min():.2f} to {contrast_vals.max():.2f}")
+        print(f"  Percentile: {n_percentile} values from {percentile_vals.min():.1f} to {percentile_vals.max():.1f}")
         print(f"\nTesting {total_combinations} parameter combinations")
         print(f"On {len(self.ground_truth_nuclei)} nuclei")
         
@@ -232,16 +255,28 @@ class ParameterSpaceGenerator:
         
         return self.grid_results
     
-    def _detect_foci_for_nucleus(self, nucleus_mask, channel_image, original_image, bright_grid, contrast_grid, percentile_grid, cell_id):
+    def _detect_foci_for_nucleus(self, nucleus_mask, channel_image, original_image,
+                                 bright_grid, contrast_grid, percentile_grid, cell_id):
         """
         Run actual foci detection for one nucleus across all parameters.
         NOW USES THE SAME DETECTION PIPELINE AS MAIN PROGRAM.
         """
+        # ✅ ADD DEBUG OUTPUT
+        print(f"\n    🔍 Debug nucleus {cell_id}:")
+
+        # ✅ FIX: Ensure original_image is also float
+        original_image_float = img_as_float(original_image)
+        
         # Isolate nucleus
         isolated_img = img_as_float(channel_image.copy())
         isolated_img[~nucleus_mask] = 0
         
+        # ✅ CHECK 1: Is there any signal?
+        print(f"      Max intensity in isolated nucleus: {isolated_img.max():.6f}")
+        print(f"      Nucleus mask size: {np.sum(nucleus_mask)} pixels")
+        
         if isolated_img.max() == 0:
+            print(f"      ❌ EARLY EXIT: No signal in isolated nucleus")
             return []
         
         # Apply DoG filter (same as main program)
@@ -251,8 +286,13 @@ class ParameterSpaceGenerator:
                                                  out_range=(0, isolated_img.max()))
         
         # Get positive pixels for percentile calculation
-        pos_pixels = original_image[original_image > 0]
+        pos_pixels = original_image_float[original_image_float > 0]
+        
+        # ✅ CHECK 2: Are there positive pixels?
+        print(f"      Positive pixels in original: {pos_pixels.size}")
+        
         if pos_pixels.size == 0:
+            print(f"      ❌ EARLY EXIT: No positive pixels in original image")
             return []
         
         # Prepare parameter arrays
@@ -264,22 +304,37 @@ class ParameterSpaceGenerator:
         min_brightness_per_param = np.percentile(pos_pixels, percentile_grid_arr)
         global_min_brightness = np.min(min_brightness_per_param)
         
+        # ✅ CHECK 3: What's the minimum brightness?
+        print(f"      Global min brightness: {global_min_brightness:.6f}")
+        print(f"      Range of min_brightness_per_param: {min_brightness_per_param.min():.6f} - {min_brightness_per_param.max():.6f}")
+        
         # Find candidates (same as main program)
         candidates_filtered = peak_local_max(filtered_img, min_distance=2, 
                                             threshold_abs=global_min_brightness)
         candidates_unfiltered = peak_local_max(isolated_img, min_distance=2, 
                                               threshold_abs=global_min_brightness)
         
+        # ✅ CHECK 4: Are candidates found?
+        print(f"      Candidates (filtered): {len(candidates_filtered)}")
+        print(f"      Candidates (unfiltered): {len(candidates_unfiltered)}")
+        
         if len(candidates_filtered) == 0 or len(candidates_unfiltered) == 0:
+            print(f"      ❌ EARLY EXIT: No candidates found")
             return []
         
         # Extract intensities
         unf_intensities = isolated_img[candidates_unfiltered[:, 0], candidates_unfiltered[:, 1]]
         filt_intensities = filtered_img[candidates_filtered[:, 0], candidates_filtered[:, 1]]
         
+        # ✅ CHECK 5: What are the candidate intensities?
+        print(f"      Unfiltered intensity range: {unf_intensities.min():.6f} - {unf_intensities.max():.6f}")
+        print(f"      Filtered intensity range: {filt_intensities.min():.6f} - {filt_intensities.max():.6f}")
+        
         # ✅ USE REAL BACKGROUND CALCULATION FROM MAIN PROGRAM
         unique_brights = np.unique(np.round(bright_grid_arr, 6))
         bright_to_idx = {b: idx for idx, b in enumerate(unique_brights)}
+        
+        print(f"      Computing backgrounds for {len(unique_brights)} unique brightness percentiles...")
         
         local_percentiles_unf, texture_info_unf = compute_adaptive_background_texture_nucleus_fallback(
             image=isolated_img,
@@ -289,20 +344,22 @@ class ParameterSpaceGenerator:
             return_texture_info=True
         )
         
-        local_percentiles_filt, _ = compute_adaptive_background_texture_nucleus_fallback(
+        local_percentiles_filt = compute_adaptive_background_texture_nucleus_fallback(
             image=filtered_img,
             coords=candidates_filtered,
             unique_percentiles=unique_brights,
             nucleus_mask=nucleus_mask,
+            return_texture_info=False  # Or just omit this parameter (False is default)
         )
         
-        # ✅ CHECK FOR UNIFORM NUCLEI (same as main program)
+        # ✅ CHECK 6: Nucleus texture
         contrast_multiplier = 1.0
         if texture_info_unf['nucleus_stats']:
             stats = list(texture_info_unf['nucleus_stats'].values())[0]
             nucleus_cv = stats['cv']
-            if nucleus_cv < 0.20:  # Same threshold as main program
-                print(f"    ⚠️ Nucleus {cell_id}: Low texture (CV={nucleus_cv:.3f}) - applying stricter filters")
+            print(f"      Nucleus CV: {nucleus_cv:.3f}")
+            if nucleus_cv < 0.20:
+                print(f"      ⚠️ Low texture - applying 1.5x contrast multiplier")
                 contrast_multiplier = 1.5
                 contrast_grid_arr = contrast_grid_arr * contrast_multiplier
         
@@ -312,6 +369,8 @@ class ParameterSpaceGenerator:
         results = []
         
         # ✅ USE VECTORIZED FILTERING FROM MAIN PROGRAM
+        print(f"      Testing {len(bright_grid)} parameter combinations...")
+        
         for p_idx in range(len(bright_grid)):
             confirmed_coords, count = apply_foci_filters(
                 p_idx, bright_grid_arr, contrast_grid_arr, percentile_grid_arr,
@@ -329,8 +388,10 @@ class ParameterSpaceGenerator:
                 'foci_count': count
             })
         
+        print(f"      ✅ Generated {len(results)} results")
+        print(f"      Foci counts range: {min([r['foci_count'] for r in results])} - {max([r['foci_count'] for r in results])}")
+        
         return results
-    
 
     def find_valid_intersection(self):
         """
@@ -507,17 +568,15 @@ class ParameterSpaceGenerator:
         if self.grid_results is None:
             return
         
-        n_nuclei = len(self.ground_truth_nuclei)
-        fig = plt.figure(figsize=(16, 4 * n_nuclei))
-        fig.suptitle('Parameter Space Exploration - Per Nucleus', fontsize=16, fontweight='bold')
-        
         for idx, (cell_id, expected_count) in enumerate(self.ground_truth_nuclei.items()):
-            ax = fig.add_subplot(n_nuclei, 1, idx + 1, projection='3d')
+            fig = plt.figure(figsize=(12, 8))  # Fixed size for each
+            ax = fig.add_subplot(111, projection='3d')
             
             # Get data for this nucleus
             nucleus_data = self.grid_results[self.grid_results['cell_num'] == cell_id]
             
             if len(nucleus_data) == 0:
+                plt.close(fig)
                 continue
             
             # Normalize coordinates for display
@@ -539,7 +598,7 @@ class ParameterSpaceGenerator:
             # Plot correct points (green, larger)
             if correct_mask.any():
                 ax.scatter(x_norm[correct_mask], y_norm[correct_mask], z_norm[correct_mask],
-                          c='green', s=20, alpha=0.8, label='Correct')
+                          c='green', s=10, alpha=0.8, label='Correct')
             
             ax.set_xlabel('Background % (normalized)')
             ax.set_ylabel('Contrast Thresh (normalized)')
@@ -551,7 +610,7 @@ class ParameterSpaceGenerator:
             ax.set_ylim(0, 1)
             ax.set_zlim(0, 1)
         
-        plt.tight_layout()
+            plt.tight_layout()
         plt.show()
     
     def _visualize_valid_intersection(self):
@@ -587,7 +646,7 @@ class ParameterSpaceGenerator:
             z_valid = (self.valid_points[:, 2] - self.param_ranges['percentile_val'][0]) / \
                      (self.param_ranges['percentile_val'][1] - self.param_ranges['percentile_val'][0])
             
-            ax.scatter(x_valid, y_valid, z_valid, c='green', s=50, alpha=0.8, 
+            ax.scatter(x_valid, y_valid, z_valid, c='green', s=10, alpha=0.8, 
                       edgecolor='darkgreen', linewidth=1, label='Valid for ALL nuclei')
         
         ax.set_xlabel('Background % (normalized)')
@@ -809,6 +868,8 @@ class ParameterSpaceGenerator:
         
         crop_dog = filters.difference_of_gaussians(crop_img, low_sigma=1, high_sigma=2)
         crop_dog = np.clip(crop_dog, 0, None)
+        crop_dog = exposure.rescale_intensity(crop_dog, in_range='image', 
+                                                 out_range=(0, crop_img.max()))
         
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
         
@@ -823,6 +884,8 @@ class ParameterSpaceGenerator:
         axes[1].axis('off')
         
         enhanced = exposure.equalize_adapthist(crop_img)
+        enhanced = exposure.rescale_intensity(enhanced, in_range='image', 
+                                                 out_range=(0, crop_img.max()))
         axes[2].imshow(enhanced, cmap='hot')
         axes[2].contour(crop_mask, colors='cyan', linewidths=2)
         axes[2].set_title('Enhanced')
@@ -842,12 +905,13 @@ class ParameterSpaceGenerator:
     def _show_all_nuclei_overview(self, masks, channel_image, used_ids):
         """Show overview of all nuclei."""
         from skimage.segmentation import find_boundaries
+        from matplotlib import patheffects
         
         fig, ax = plt.subplots(figsize=(12, 10))
         ax.imshow(channel_image, cmap='gray')
         
         boundaries = find_boundaries(masks, mode='outer')
-        ax.contour(boundaries, colors='cyan', linewidths=1, alpha=0.5)
+        ax.contour(boundaries, colors='cyan', linewidths=0.5, alpha=0.1)
         
         for nucleus_id in np.unique(masks)[1:]:
             nucleus_mask = (masks == nucleus_id)
@@ -866,10 +930,11 @@ class ParameterSpaceGenerator:
                 color = 'white'
                 text = str(nucleus_id)
             
+            # ✅ Remove background box entirely - just text with outline
             ax.text(cx, cy, text, color=color, fontsize=8,
                    ha='center', va='center',
-                   bbox=dict(boxstyle='round,pad=0.2',
-                            facecolor='black', alpha=0.7))
+                   alpha = 0.3
+                   ) 
         
         ax.set_title('All Nuclei - Green=Selected')
         ax.axis('off')
