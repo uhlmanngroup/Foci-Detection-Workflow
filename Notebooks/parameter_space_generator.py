@@ -40,6 +40,7 @@ class ParameterSpaceGenerator:
         self.kde_model = None
         self.hull = None
         self.bounds = None
+        self.kde_metadata = None
         
     def add_nucleus(self, cell_id, expected_count):
         """Add a nucleus with its expected foci count."""
@@ -525,14 +526,16 @@ class ParameterSpaceGenerator:
         # Build Delaunay triangulation
         print("\n4. Building Delaunay triangulation...")
         if len(isosurface_points) > 0:
-            self.hull = Delaunay(isosurface_points)
+            # ✅ Denormalize before creating hull
+            denorm_isosurface = self._denormalize_parameters(isosurface_points)
+            self.hull = Delaunay(denorm_isosurface)  
         else:
             print("   ⚠️ No isosurface points, using valid points directly")
-            self.hull = Delaunay(normalized_points)
+            self.hull = Delaunay(self.valid_points)  
         
         # Calculate bounds
         if len(isosurface_points) > 0:
-            denorm_points = self._denormalize_parameters(isosurface_points)
+            denorm_points = denorm_isosurface  
         else:
             denorm_points = self.valid_points
         
@@ -593,24 +596,40 @@ class ParameterSpaceGenerator:
             # Plot incorrect points (light gray, smaller)
             if (~correct_mask).any():
                 ax.scatter(x_norm[~correct_mask], y_norm[~correct_mask], z_norm[~correct_mask],
-                          c='lightgray', s=5, alpha=0.3, label='Incorrect')
+                          c='lightgray', s=2, alpha=0.1, label='Incorrect')
             
             # Plot correct points (green, larger)
             if correct_mask.any():
                 ax.scatter(x_norm[correct_mask], y_norm[correct_mask], z_norm[correct_mask],
                           c='green', s=10, alpha=0.8, label='Correct')
             
-            ax.set_xlabel('Background % (normalized)')
-            ax.set_ylabel('Contrast Thresh (normalized)')
-            ax.set_zlabel('Global Percentile (normalized)')
-            ax.set_title(f'Nucleus {cell_id} - Expected: {expected_count} foci\n'
-                        f'Green: {correct_mask.sum()} correct / Gray: {(~correct_mask).sum()} incorrect')
-            ax.legend()
+            # Set axis labels
+            ax.set_xlabel('Background %')
+            ax.set_ylabel('Contrast Thresh')
+            ax.set_zlabel('Global Percentile')
+            
+            # Set axis limits (still 0-1 for normalized data)
             ax.set_xlim(0, 1)
             ax.set_ylim(0, 1)
             ax.set_zlim(0, 1)
+            
+            # ✅ CUSTOMIZE TICK LABELS TO SHOW REAL VALUES
+            # X-axis: 0-100 (Background %)
+            ax.set_xticks([0, 0.25, 0.5, 0.75, 1.0])
+            ax.set_xticklabels(['0', '25', '50', '75', '100'])
+            
+            # Y-axis: 1-10 (Contrast Thresh)
+            ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+            ax.set_yticklabels(['1.0', '3.25', '5.5', '7.75', '10.0'])
+            
+            # Z-axis: 0-100 (Global Percentile)
+            ax.set_zticks([0, 0.25, 0.5, 0.75, 1.0])
+            ax.set_zticklabels(['0', '25', '50', '75', '100'])
+            ax.set_title(f'Nucleus {cell_id} - Expected: {expected_count} foci\n'
+                        f'Green: {correct_mask.sum()} correct / Gray: {(~correct_mask).sum()} incorrect')
+            ax.legend()
         
-            plt.tight_layout()
+            
         plt.show()
     
     def _visualize_valid_intersection(self):
@@ -635,7 +654,7 @@ class ParameterSpaceGenerator:
         z_all = (all_params['percentile_val'] - self.param_ranges['percentile_val'][0]) / \
                 (self.param_ranges['percentile_val'][1] - self.param_ranges['percentile_val'][0])
         
-        ax.scatter(x_all, y_all, z_all, c='lightgray', s=2, alpha=0.2, label='All tested')
+        ax.scatter(x_all, y_all, z_all, c='lightgray', s=2, alpha=0.1, label='All tested')
         
         # Plot valid intersection in green
         if self.valid_points is not None and len(self.valid_points) > 0:
@@ -649,101 +668,199 @@ class ParameterSpaceGenerator:
             ax.scatter(x_valid, y_valid, z_valid, c='green', s=10, alpha=0.8, 
                       edgecolor='darkgreen', linewidth=1, label='Valid for ALL nuclei')
         
-        ax.set_xlabel('Background % (normalized)')
-        ax.set_ylabel('Contrast Thresh (normalized)')
-        ax.set_zlabel('Global Percentile (normalized)')
-        ax.set_title(f'Parameters valid for all {len(self.ground_truth_nuclei)} nuclei\n'
-                    f'Green: {len(self.valid_points) if self.valid_points is not None else 0} valid combinations')
-        ax.legend()
+        # Set axis labels
+        ax.set_xlabel('Background %')
+        ax.set_ylabel('Contrast Thresh')
+        ax.set_zlabel('Global Percentile')
+        
+        # Set axis limits (still 0-1 for normalized data)
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.set_zlim(0, 1)
         
-        plt.tight_layout()
+        # ✅ CUSTOMIZE TICK LABELS TO SHOW REAL VALUES
+        # X-axis: 0-100 (Background %)
+        ax.set_xticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax.set_xticklabels(['0', '25', '50', '75', '100'])
+        
+        # Y-axis: 1-10 (Contrast Thresh)
+        ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax.set_yticklabels(['1.0', '3.25', '5.5', '7.75', '10.0'])
+        
+        # Z-axis: 0-100 (Global Percentile)
+        ax.set_zticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax.set_zticklabels(['0', '25', '50', '75', '100'])
+        ax.set_title(f'Parameters valid for all {len(self.ground_truth_nuclei)} nuclei\n'
+                    f'Green: {len(self.valid_points) if self.valid_points is not None else 0} valid combinations')
+        ax.legend()
+
+        
+        
         plt.show()
     
     def _visualize_kde_and_delaunay(self):
         """
-        Visualize KDE isosurface and final Delaunay triangulation.
+        Visualize KDE isosurface and final Delaunay triangulation as 3D meshes.
         """
         if self.kde_metadata is None:
             return
         
+        from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+        
         fig = plt.figure(figsize=(16, 8))
         fig.suptitle('KDE Isosurface and Delaunay Triangulation', fontsize=16, fontweight='bold')
         
-        # Left plot: KDE Isosurface
+        # ✅ NORMALIZE VALID POINTS - THEN SWAP X AND Y
+        if self.valid_points is not None and len(self.valid_points) > 0:
+            bright_norm = (self.valid_points[:, 0] - self.param_ranges['bright_pct'][0]) / \
+                         (self.param_ranges['bright_pct'][1] - self.param_ranges['bright_pct'][0])
+            contrast_norm = (self.valid_points[:, 1] - self.param_ranges['contrast_thresh'][0]) / \
+                           (self.param_ranges['contrast_thresh'][1] - self.param_ranges['contrast_thresh'][0])
+            percentile_norm = (self.valid_points[:, 2] - self.param_ranges['percentile_val'][0]) / \
+                             (self.param_ranges['percentile_val'][1] - self.param_ranges['percentile_val'][0])
+            
+            # ✅ SWAP: X = Contrast, Y = Background (to match grid search)
+            x_valid = contrast_norm      # X-axis = Contrast Thresh
+            y_valid = bright_norm        # Y-axis = Background %
+            z_valid = percentile_norm    # Z-axis = Percentile
+        
+        # ================================================================
+        # LEFT PLOT: KDE ISOSURFACE
+        # ================================================================
         ax1 = fig.add_subplot(121, projection='3d')
         
-        # Plot valid points
+        # Plot valid points (red dots) - NOW WITH SWAPPED AXES
         if self.valid_points is not None and len(self.valid_points) > 0:
-            x_valid = (self.valid_points[:, 0] - self.param_ranges['bright_pct'][0]) / \
-                     (self.param_ranges['bright_pct'][1] - self.param_ranges['bright_pct'][0])
-            y_valid = (self.valid_points[:, 1] - self.param_ranges['contrast_thresh'][0]) / \
-                     (self.param_ranges['contrast_thresh'][1] - self.param_ranges['contrast_thresh'][0])
-            z_valid = (self.valid_points[:, 2] - self.param_ranges['percentile_val'][0]) / \
-                     (self.param_ranges['percentile_val'][1] - self.param_ranges['percentile_val'][0])
-            
-            ax1.scatter(x_valid, y_valid, z_valid, c='red', s=30, alpha=0.8,
-                       edgecolor='darkred', linewidth=1, label='Valid points')
+            ax1.scatter(x_valid, y_valid, z_valid, c='red', s=3, alpha=0.1,
+                       edgecolor='darkred', linewidth=1, label='Valid points', zorder=10)
         
-        # Plot isosurface points
+        # KDE isosurface as mesh - SWAP COLUMNS [1,0,2] = [Contrast, Background, Percentile]
         iso_points = self.kde_metadata['isosurface_points']
-        if len(iso_points) > 0:
-            # Subsample for visualization if too many
-            if len(iso_points) > 2000:
-                idx = np.random.choice(len(iso_points), 2000, replace=False)
-                iso_viz = iso_points[idx]
-            else:
-                iso_viz = iso_points
-            
-            ax1.scatter(iso_viz[:, 0], iso_viz[:, 1], iso_viz[:, 2],
-                       c='lightblue', s=5, alpha=0.2, label='KDE isosurface')
+        if len(iso_points) > 3:
+            try:
+                from scipy.spatial import ConvexHull
+                
+                # ✅ SWAP columns before creating hull
+                iso_points_swapped = iso_points[:, [1, 0, 2]]  # [Contrast, Background, Percentile]
+                hull_iso = ConvexHull(iso_points_swapped)
+                
+                # Create mesh collection
+                faces = []
+                for simplex in hull_iso.simplices:
+                    faces.append(iso_points_swapped[simplex])
+                
+                mesh = Poly3DCollection(faces, alpha=0.2, facecolor='lightblue', 
+                                       edgecolor='blue', linewidth=0.2)
+                ax1.add_collection3d(mesh)
+                
+            except Exception as e:
+                print(f"⚠️ Could not create KDE surface: {e}")
         
-        ax1.set_xlabel('Background % (normalized)')
-        ax1.set_ylabel('Contrast Thresh (normalized)')
-        ax1.set_zlabel('Global Percentile (normalized)')
-        ax1.set_title(f'KDE Isosurface\nBandwidth: {self.kde_metadata["bandwidth"]:.3f}')
-        ax1.legend()
+        # ✅ SWAPPED AXIS LABELS (X=Contrast, Y=Background)
+        ax1.set_xlabel('Contrast Thresh')
+        ax1.set_ylabel('Background %')
+        ax1.set_zlabel('Global Percentile')
+        
+        # Set axis limits (still 0-1 for normalized data)
         ax1.set_xlim(0, 1)
         ax1.set_ylim(0, 1)
         ax1.set_zlim(0, 1)
         
-        # Right plot: Delaunay Hull
+        # ✅ SWAPPED TICK LABELS
+        # X-axis: 1-10 (Contrast Thresh)
+        ax1.set_xticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax1.set_xticklabels(['10.0', '7.75', '5.5', '3.25', '1.0'])  # ✅ Reversed order
+        ax1.invert_xaxis()  # ✅ INVERT X-AXIS
+        
+        # Y-axis: 0-100 (Background %)
+        ax1.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax1.set_yticklabels(['0', '25', '50', '75', '100'])
+        
+        # Z-axis: 0-100 (Global Percentile)
+        ax1.set_zticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax1.set_zticklabels(['0', '25', '50', '75', '100'])
+        
+        ax1.set_title(f'KDE Isosurface\nBandwidth: {self.kde_metadata["bandwidth"]:.3f}')
+        ax1.legend()
+        ax1.view_init(elev=20, azim=45)
+        
+        # ================================================================
+        # RIGHT PLOT: DELAUNAY HULL
+        # ================================================================
         ax2 = fig.add_subplot(122, projection='3d')
         
-        # Plot Delaunay hull points
         if self.hull is not None:
-            hull_points = self.hull.points
+            # 🔧 OLD CODE (causes double denormalization):
+            # hull_points = self.hull.points  # These are NOW ALREADY REAL VALUES!
+            # # Then it would try to denormalize them again
             
-            # Plot hull vertices
-            ax2.scatter(hull_points[:, 0], hull_points[:, 1], hull_points[:, 2],
-                       c='blue', s=10, alpha=0.6, label='Hull vertices')
+            # ✅ NEW CODE: Hull points are already in real values, need to NORMALIZE for display
+            hull_points_real = self.hull.points  # Already in real values
             
-            # Try to plot some hull edges (simplified)
-            if len(hull_points) < 100:  # Only for small hulls to avoid clutter
-                for simplex in self.hull.simplices[:50]:  # Show first 50 simplices
-                    for i in range(len(simplex)):
-                        for j in range(i+1, len(simplex)):
-                            pts = hull_points[[simplex[i], simplex[j]]]
-                            ax2.plot(pts[:, 0], pts[:, 1], pts[:, 2],
-                                   'b-', alpha=0.1, linewidth=0.5)
+            # Normalize hull points for 0-1 display
+            hull_points = self._normalize_parameters(hull_points_real)
+                 
+            # Extract surface triangles
+            try:
+                from scipy.spatial import ConvexHull
+                
+                # ✅ SWAP columns before creating hull
+                hull_points_swapped = hull_points[:, [1, 0, 2]]  # [Contrast, Background, Percentile]
+                outer_hull = ConvexHull(hull_points_swapped)
+                
+                # Create mesh
+                faces = []
+                for simplex in outer_hull.simplices:
+                    faces.append(hull_points_swapped[simplex])
+                
+                mesh = Poly3DCollection(faces, alpha=0.25, facecolor='cyan',
+                                       edgecolor='darkblue', linewidth=0.5)
+                ax2.add_collection3d(mesh)
+                
+                # ✅ Plot vertices with SWAPPED coordinates
+                ax2.scatter(hull_points_swapped[:, 0], hull_points_swapped[:, 1], hull_points_swapped[:, 2],
+                           c='blue', s=5, alpha=0.4, label='Hull vertices', zorder=10)
+                
+            except Exception as e:
+                print(f"⚠️ Could not create Delaunay surface: {e}")
+                # Fallback with swapped coordinates
+                hull_points_swapped = hull_points[:, [1, 0, 2]]
+                ax2.scatter(hull_points_swapped[:, 0], hull_points_swapped[:, 1], hull_points_swapped[:, 2],
+                           c='blue', s=5, alpha=0.6)
         
-        # Also show valid points for reference
+        # Show valid points (red dots) - NOW WITH SWAPPED AXES
         if self.valid_points is not None and len(self.valid_points) > 0:
-            ax2.scatter(x_valid, y_valid, z_valid, c='red', s=20, alpha=0.8,
-                       edgecolor='darkred', linewidth=1, label='Original valid points')
+            ax2.scatter(x_valid, y_valid, z_valid, c='red', s=3, alpha=0.1,
+                       edgecolor='darkred', linewidth=1, label='Valid points', zorder=10)
         
-        ax2.set_xlabel('Background % (normalized)')
-        ax2.set_ylabel('Contrast Thresh (normalized)')
-        ax2.set_zlabel('Global Percentile (normalized)')
-        ax2.set_title(f'Delaunay Triangulation\n{len(hull_points) if self.hull else 0} hull points')
-        ax2.legend()
+        # ✅ SWAPPED AXIS LABELS (X=Contrast, Y=Background)
+        ax2.set_xlabel('Contrast Thresh')
+        ax2.set_ylabel('Background %')
+        ax2.set_zlabel('Global Percentile')
+        
+        # Set axis limits (still 0-1 for normalized data)
         ax2.set_xlim(0, 1)
         ax2.set_ylim(0, 1)
         ax2.set_zlim(0, 1)
         
-        plt.tight_layout()
+        # ✅ SWAPPED TICK LABELS
+        # X-axis: 1-10 (Contrast Thresh)
+        ax2.set_xticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax2.set_xticklabels(['10.0', '7.75', '5.5', '3.25', '1.0'])  # ✅ Reversed order
+        ax2.invert_xaxis()  # ✅ INVERT X-AXIS
+        
+        # Y-axis: 0-100 (Background %)
+        ax2.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax2.set_yticklabels(['0', '25', '50', '75', '100'])
+        
+        # Z-axis: 0-100 (Global Percentile)
+        ax2.set_zticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax2.set_zticklabels(['0', '25', '50', '75', '100'])
+        
+        ax2.set_title(f'Delaunay Hull\n{len(hull_points) if self.hull else 0} points')
+        ax2.legend()
+        ax2.view_init(elev=20, azim=45)
+        
         plt.show()
     
     def _normalize_parameters(self, params):
@@ -925,15 +1042,17 @@ class ParameterSpaceGenerator:
             
             if nucleus_id in self.ground_truth_nuclei:
                 color = 'lime'
+                transparent = 1
                 text = f"{nucleus_id}✓"
             else:
                 color = 'white'
+                transparent = 0.3
                 text = str(nucleus_id)
             
             # ✅ Remove background box entirely - just text with outline
             ax.text(cx, cy, text, color=color, fontsize=8,
                    ha='center', va='center',
-                   alpha = 0.3
+                   alpha = transparent
                    ) 
         
         ax.set_title('All Nuclei - Green=Selected')

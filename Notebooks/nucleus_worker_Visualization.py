@@ -753,57 +753,36 @@ def detect_foci_single_channel(
     bright_to_idx = {b: idx for idx, b in enumerate(unique_brights)}
     
     # Compute local backgrounds
-    use_texture_filtering = True  # Enable texture-aware filtering
-    min_cv_threshold = 0.20  # Nuclei with CV below this are "uniform"
+    min_cv_threshold = 0.20
     
-    if use_texture_filtering:
-        # Use texture-aware backgrounds
-        local_percentiles_unf, texture_info_unf = compute_adaptive_background_texture_nucleus_fallback(
-            image=isolated_img,
-            coords=unf_yx,
-            unique_percentiles=unique_brights, 
-            nucleus_mask=nucleus_mask,
-            return_texture_info=True  # GET TEXTURE INFO
-        )
+    local_percentiles_unf, texture_info_unf = compute_adaptive_background_texture_nucleus_fallback(
+        image=isolated_img,
+        coords=unf_yx,
+        unique_percentiles=unique_brights, 
+        nucleus_mask=nucleus_mask,
+        return_texture_info=True
+    )
+    
+    local_percentiles_filt, texture_info_filt = compute_adaptive_background_texture_nucleus_fallback(
+        image=filtered_img, 
+        coords=filt_yx, 
+        unique_percentiles=unique_brights, 
+        nucleus_mask=nucleus_mask,
+        return_texture_info=True
+    )
         
-        local_percentiles_filt, texture_info_filt = compute_adaptive_background_texture_nucleus_fallback(
-            image=filtered_img, 
-            coords=filt_yx, 
-            unique_percentiles=unique_brights, 
-            nucleus_mask=nucleus_mask,
-            return_texture_info=True  # GET TEXTURE INFO
-        )
+    # Check if nucleus is uniform (likely false positives)
+    nucleus_is_uniform = False
+    contrast_multiplier = 1.0
+    
+    if texture_info_unf['nucleus_stats']:
+        stats = list(texture_info_unf['nucleus_stats'].values())[0]
+        nucleus_cv = stats['cv']
         
-        # Check if nucleus is uniform (likely false positives)
-        nucleus_is_uniform = False
-        contrast_multiplier = 1.0
-        
-        if texture_info_unf['nucleus_stats']:
-            stats = list(texture_info_unf['nucleus_stats'].values())[0]
-            nucleus_cv = stats['cv']
-            
-            if nucleus_cv < min_cv_threshold:
-                print(f"    ⚠️ Cell {cell_id}: Low texture (CV={nucleus_cv:.3f}) - applying stricter filters")
-                nucleus_is_uniform = True
-                contrast_multiplier = 1.5  # Require 50% higher contrast for uniform nuclei
-    else:
-        # Fallback to original method
-        local_percentiles_unf = compute_adaptive_background_expanded_edge(
-            image=isolated_img,
-            coords=unf_yx,
-            unique_percentiles=unique_brights, 
-            nucleus_mask=nucleus_mask  
-        )
-        
-        local_percentiles_filt = compute_adaptive_background_expanded_edge(
-            image=filtered_img, 
-            coords=filt_yx, 
-            unique_percentiles=unique_brights, 
-            nucleus_mask=nucleus_mask,
-        )
-        nucleus_is_uniform = False
-        contrast_multiplier = 1.0
-
+        if nucleus_cv < min_cv_threshold:
+            print(f"    ⚠️ Cell {cell_id}: Low texture (CV={nucleus_cv:.3f}) - applying stricter filters")
+            nucleus_is_uniform = True
+            contrast_multiplier = 1.5  # Require 50% higher contrast for uniform nuclei
     
     distances = cdist(unf_yx, filt_yx)
     tolerance = 2
@@ -869,21 +848,22 @@ def detect_foci_single_channel(
     filt_bright_mask = filt_peak_intensities >= min_brightness
     
     # Apply LOCAL BACKGROUND contrast filter
-    unf_local_bg = compute_adaptive_background_expanded_edge(
+    unf_local_bg = compute_adaptive_background_texture_nucleus_fallback(
         image=isolated_img,
         coords=coordinates_unfiltered,
-        unique_percentiles=[best_bright_pct],
-        nucleus_mask=nucleus_mask, 
-    )[:, 0]
-
-    filt_local_bg = compute_adaptive_background_expanded_edge(
-        image=filtered_img,
-        coords=coordinates_filtered,
-        unique_percentiles=[best_bright_pct],
+        unique_percentiles=[best_bright_pct], 
         nucleus_mask=nucleus_mask,
+        return_texture_info=False
+    )[:, 0]
+    
+    filt_local_bg = compute_adaptive_background_texture_nucleus_fallback(
+        image=filtered_img, 
+        coords=coordinates_filtered, 
+        unique_percentiles=[best_bright_pct], 
+        nucleus_mask=nucleus_mask,
+        return_texture_info=False
     )[:, 0]
 
-    
     unf_contrast_mask = unf_peak_intensities > (unf_local_bg * best_contrast_thresh)
     filt_contrast_mask = filt_peak_intensities > (filt_local_bg * best_contrast_thresh)
     
@@ -1009,11 +989,19 @@ def process_single_nucleus(args):
     """
     Process one nucleus across all provided channels.
     
-    NOW RETURNS: (foci_data_list, nuclei_data_list, watershed_data_list)
-    watershed_data_list contains dictionaries with watershed labels for each channel
+    NOW ACCEPTS SEPARATE PARAMETER SPACES FOR TRITC AND FITC:
+    - valid_param_samples_TRITC: TRITC-specific parameter space
+    - valid_param_samples_FITC: FITC-specific parameter space
+    - total_iterations_TRITC: number of TRITC iterations
+    - total_iterations_FITC: number of FITC iterations
+    
+    Returns: (foci_data_list, nuclei_data_list, watershed_data_list)
     """
-    (cellnumber, masks, channel_images, valid_param_samples, 
-     total_iterations, well_number, position_number, water_threshold_percentile_TRITC, water_threshold_percentile_FITC) = args
+    (cellnumber, masks, channel_images, 
+     valid_param_samples_TRITC, valid_param_samples_FITC,
+     total_iterations_TRITC, total_iterations_FITC,
+     well_number, position_number, 
+     water_threshold_percentile_TRITC, water_threshold_percentile_FITC) = args
     
     # Create mask for current nucleus
     masks_reduced = (masks == cellnumber)
@@ -1055,16 +1043,16 @@ def process_single_nucleus(args):
         intensity_data = analyze_channel_intensity(masks_reduced, channel_image_float, channel_name)
         nucleus_data.update(intensity_data)
         
-        # Detect foci ONLY for TRITC and FITC
-        if channel_name in ["TRITC"]:
-            foci_list, foci_summary, water_labels = detect_foci_single_channel(  # ← CHANGED: Now gets 3 returns
+        # Detect foci with CHANNEL-SPECIFIC parameters
+        if channel_name == "TRITC":
+            foci_list, foci_summary, water_labels = detect_foci_single_channel(
                 masks_reduced,
                 channel_image_float,
                 channel_image_float,
                 channel_name,
                 cellnumber,
-                valid_param_samples,
-                total_iterations,
+                valid_param_samples_TRITC,  # ← TRITC-specific parameters
+                total_iterations_TRITC,     # ← TRITC iteration count
                 water_threshold_percentile_TRITC, 
                 well_number,
                 position_number
@@ -1089,14 +1077,14 @@ def process_single_nucleus(args):
                 })
 
         if channel_name in ["FITC"]:
-            foci_list, foci_summary, water_labels = detect_foci_single_channel(  # ← CHANGED: Now gets 3 returns
+            foci_list, foci_summary, water_labels = detect_foci_single_channel(
                 masks_reduced,
                 channel_image_float,
                 channel_image_float,
                 channel_name,
                 cellnumber,
-                valid_param_samples,
-                total_iterations,
+                valid_param_samples_FITC,  # ← FITC-specific parameters
+                total_iterations_FITC,     # ← FITC iteration count
                 water_threshold_percentile_FITC, 
                 well_number,
                 position_number
