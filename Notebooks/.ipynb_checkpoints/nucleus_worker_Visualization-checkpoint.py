@@ -700,6 +700,7 @@ def analyze_channel_intensity(nucleus_mask, image, channel_name):
 def detect_foci_single_channel(
     nucleus_mask, image, original_image, channel_name, cell_id,
     valid_param_samples, total_iterations, water_threshold_percentile,
+    watershed_min_detection_prob=0.0, 
     well_number=None, position_number=None
 ):
     """
@@ -782,7 +783,7 @@ def detect_foci_single_channel(
         if nucleus_cv < min_cv_threshold:
             print(f"    ⚠️ Cell {cell_id}: Low texture (CV={nucleus_cv:.3f}) - applying stricter filters")
             nucleus_is_uniform = True
-            contrast_multiplier = 1.5  # Require 50% higher contrast for uniform nuclei
+            contrast_multiplier = 1  # was 1.5 : Require 50% higher contrast for uniform nuclei
     else:
         nucleus_cv = 0.0  # ← Fallback for safety (should never happen)
     
@@ -820,68 +821,23 @@ def detect_foci_single_channel(
     min_foci = int(min(foci_counts))
     max_foci = int(max(foci_counts))
     
-    # Run watershed with best parameters
-    max_idx = np.argmax(foci_counts)
-    best_params = valid_param_samples[max_idx]
-    best_bright_pct = best_params[0]
-    best_contrast_thresh = best_params[1]
-    percentile_val = best_params[2]
+    # ===============================================================
+    # WATERSHED: Use ALL detected foci from parameter sweep
+    # ===============================================================
+    # Filter foci by detection probability threshold
+    # This uses the accumulated foci_detection_count from the parameter sweep
+    watershed_foci = []
+    for coord, count in foci_detection_count.items():
+        detection_prob = (count / total_iterations) * 100
+        if detection_prob >= watershed_min_detection_prob:
+            watershed_foci.append(coord)
     
-    # Calculate minimum brightness from original image
-    min_brightness = np.percentile(original_image[original_image > 0], percentile_val)
+    if len(watershed_foci) == 0:
+        # No foci passed the threshold
+        return [], {}, None
     
-    # Find candidate peaks in both filtered and unfiltered
-    coordinates_unfiltered = peak_local_max(isolated_img, min_distance=2, 
-                                           threshold_abs=min_brightness)
-    coordinates_filtered = peak_local_max(filtered_img, min_distance=2, 
-                                         threshold_abs=min_brightness)
-    
-    if coordinates_unfiltered.size == 0 or coordinates_filtered.size == 0:
-        return [], {}, None  # ← CHANGED: Added None
-    
-    # Extract intensities at peak locations
-    unf_y, unf_x = coordinates_unfiltered[:, 0], coordinates_unfiltered[:, 1]
-    filt_y, filt_x = coordinates_filtered[:, 0], coordinates_filtered[:, 1]
-    unf_peak_intensities = isolated_img[unf_y, unf_x]
-    filt_peak_intensities = filtered_img[filt_y, filt_x]
-    
-    # Apply ABSOLUTE brightness filter
-    unf_bright_mask = unf_peak_intensities >= min_brightness
-    filt_bright_mask = filt_peak_intensities >= min_brightness
-    
-    # Apply LOCAL BACKGROUND contrast filter
-    unf_local_bg = compute_adaptive_background_texture_nucleus_fallback(
-        image=isolated_img,
-        coords=coordinates_unfiltered,
-        unique_percentiles=[best_bright_pct], 
-        nucleus_mask=nucleus_mask,
-        return_texture_info=False
-    )[:, 0]
-    
-    filt_local_bg = compute_adaptive_background_texture_nucleus_fallback(
-        image=filtered_img, 
-        coords=coordinates_filtered, 
-        unique_percentiles=[best_bright_pct], 
-        nucleus_mask=nucleus_mask,
-        return_texture_info=False
-    )[:, 0]
-
-    unf_contrast_mask = unf_peak_intensities > (unf_local_bg * best_contrast_thresh)
-    filt_contrast_mask = filt_peak_intensities > (filt_local_bg * best_contrast_thresh)
-    
-    # Combine all filters
-    unf_final_mask = unf_bright_mask & unf_contrast_mask
-    filt_final_mask = filt_bright_mask & filt_contrast_mask
-    
-    coordinates_unfiltered_filtered = coordinates_unfiltered[unf_final_mask]
-    coordinates_filtered_filtered = coordinates_filtered[filt_final_mask]
-    
-    if coordinates_unfiltered_filtered.size == 0 or coordinates_filtered_filtered.size == 0:
-        return [], {}, None  # ← CHANGED: Added None
-    
-    # Match filtered and unfiltered with tolerance
-    distances_final = cdist(coordinates_unfiltered_filtered, coordinates_filtered_filtered)
-    final_coords = coordinates_unfiltered_filtered[np.min(distances_final, axis=1) <= tolerance]
+    # Convert to numpy array for watershed
+    final_coords = np.array(watershed_foci)
     
     if len(final_coords) == 0:
         return [], {}, None  # ← CHANGED: Added None
@@ -929,8 +885,6 @@ def detect_foci_single_channel(
     
     # Measure each focus
     foci_list = []
-    DETECTION_THRESHOLD = 50.0
-    confident_foci_intensities = []
     
     for idx, (y, x) in enumerate(final_coords):
         region_id = water_labels[y, x]
@@ -947,36 +901,25 @@ def detect_foci_single_channel(
             focus_circularity = compute_circularity(spot_area, focus_perimeter)
         else:
             focus_circularity = 0.0
-        
-        if detection_prob > 0:
-            if detection_prob >= DETECTION_THRESHOLD:
-                confident_foci_intensities.append(spot_intensity)
-            
-            foci_list.append({
-                'cell_num': cell_id,
-                'centr_y': int(y),
-                'centr_x': int(x),
-                'foci_area': spot_area,
-                'foci_circularity': focus_circularity,
-                'foci_total_intensity': spot_intensity,
-                'foci_mean_intensity': spot_mean_intensity,
-                'detection_prob': detection_prob,
-                'channel': channel_name
-            })
+                    
+        foci_list.append({
+            'cell_num': cell_id,
+            'centr_y': int(y),
+            'centr_x': int(x),
+            'foci_area': spot_area,
+            'foci_circularity': focus_circularity,
+            'foci_total_intensity': spot_intensity,
+            'foci_mean_intensity': spot_mean_intensity,
+            'detection_prob': detection_prob,
+            'channel': channel_name
+        })
     
-    # Calculate nucleus-level statistics
-    sum_foci_intensity = float(np.sum(confident_foci_intensities)) if confident_foci_intensities else 0.0
-    mean_foci_intensity = float(np.mean(confident_foci_intensities)) if confident_foci_intensities else 0.0
-    num_confident_foci = len(confident_foci_intensities)
     
     summary = {
         f"{channel_name}_mean_foci": mean_foci,
         f"{channel_name}_std_foci": std_foci,
         f"{channel_name}_min_foci": min_foci,
         f"{channel_name}_max_foci": max_foci,
-        f"{channel_name}_confident_foci_count": num_confident_foci,
-        f"{channel_name}_sum_foci_intensity": sum_foci_intensity,
-        f"{channel_name}_mean_foci_intensity": mean_foci_intensity,
         f"{channel_name}_texture_cv": nucleus_cv,
     }
 
@@ -989,6 +932,15 @@ def detect_foci_single_channel(
 # ===============================================================
 
 def process_single_nucleus(args):
+    (cellnumber, masks, channel_images, 
+     valid_param_samples_TRITC, valid_param_samples_FITC,
+     total_iterations_TRITC, total_iterations_FITC,
+     well_number, position_number, 
+     water_threshold_percentile_TRITC, water_threshold_percentile_FITC,
+     watershed_min_detection_prob,
+     min_cv_threshold,
+     uniform_contrast_multiplier,
+     enable_texture_filtering) = args
     """
     Process one nucleus across all provided channels.
     
@@ -1000,11 +952,6 @@ def process_single_nucleus(args):
     
     Returns: (foci_data_list, nuclei_data_list, watershed_data_list)
     """
-    (cellnumber, masks, channel_images, 
-     valid_param_samples_TRITC, valid_param_samples_FITC,
-     total_iterations_TRITC, total_iterations_FITC,
-     well_number, position_number, 
-     water_threshold_percentile_TRITC, water_threshold_percentile_FITC) = args
     
     # Create mask for current nucleus
     masks_reduced = (masks == cellnumber)
@@ -1054,11 +1001,12 @@ def process_single_nucleus(args):
                 channel_image_float,
                 channel_name,
                 cellnumber,
-                valid_param_samples_TRITC,  # ← TRITC-specific parameters
-                total_iterations_TRITC,     # ← TRITC iteration count
-                water_threshold_percentile_TRITC, 
-                well_number,
-                position_number
+                valid_param_samples_TRITC,
+                total_iterations_TRITC,
+                water_threshold_percentile_TRITC,
+                watershed_min_detection_prob=watershed_min_detection_prob,  # ← NEW
+                well_number=well_number,
+                position_number=position_number
             )
 
             
@@ -1086,13 +1034,14 @@ def process_single_nucleus(args):
                 channel_image_float,
                 channel_name,
                 cellnumber,
-                valid_param_samples_FITC,  # ← FITC-specific parameters
-                total_iterations_FITC,     # ← FITC iteration count
-                water_threshold_percentile_FITC, 
-                well_number,
-                position_number
+                valid_param_samples_FITC,
+                total_iterations_FITC,
+                water_threshold_percentile_FITC,
+                watershed_min_detection_prob=watershed_min_detection_prob, 
+                well_number=well_number,
+                position_number=position_number
             )
-            
+                    
             # Add well and position to each focus
             for focus in foci_list:
                 focus['Well'] = well_number
