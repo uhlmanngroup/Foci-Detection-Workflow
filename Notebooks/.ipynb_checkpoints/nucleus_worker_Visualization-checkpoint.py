@@ -783,6 +783,8 @@ def detect_foci_single_channel(
             print(f"    ⚠️ Cell {cell_id}: Low texture (CV={nucleus_cv:.3f}) - applying stricter filters")
             nucleus_is_uniform = True
             contrast_multiplier = 1.5  # Require 50% higher contrast for uniform nuclei
+    else:
+        nucleus_cv = 0.0  # ← Fallback for safety (should never happen)
     
     distances = cdist(unf_yx, filt_yx)
     tolerance = 2
@@ -975,6 +977,7 @@ def detect_foci_single_channel(
         f"{channel_name}_confident_foci_count": num_confident_foci,
         f"{channel_name}_sum_foci_intensity": sum_foci_intensity,
         f"{channel_name}_mean_foci_intensity": mean_foci_intensity,
+        f"{channel_name}_texture_cv": nucleus_cv,
     }
 
     # ← NEW: Return watershed labels for global visualization
