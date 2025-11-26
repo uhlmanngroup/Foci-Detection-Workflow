@@ -13,7 +13,7 @@ class Config:
     # ===============================================================
     # Path to folder containing microscopy images
     # Use raw string (r'...') to handle Windows backslashes correctly
-    FOLDER_PATH = r'Y:\Group Members\Valentin Aubry\01_Data\Data_Andreas_single'
+    FOLDER_PATH = r'Y:\Group Members\Valentin Aubry\01_Data\Test_Data_mixed_Channels\Data1'
     
     # ===============================================================
     # PARAMETER SPACE CONFIGURATION
@@ -37,7 +37,7 @@ class Config:
     # ===============================================================
     # Set to True for first few images to calibrate watershed thresholds
     # Set to False for production runs with pre-calibrated thresholds
-    CALIBRATION_MODE = False
+    CALIBRATION_MODE = True
     
     # Number of images to process in calibration mode (0 = all images)
     CALIBRATION_IMAGE_LIMIT = 1
