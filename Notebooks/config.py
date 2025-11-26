@@ -105,7 +105,7 @@ class Config:
     DIVERSITY_WEIGHT = 0.3  # Balance between performance and diversity (0-1)
     
     # File paths
-    CALIBRATION_SAVE_PATH = r"Y:\...\calibration_results.pkl"
+    CALIBRATION_SAVE_PATH = r"Y:\Group Members\Valentin Aubry\01_Data\Parameters\Complete_KDE\calibration_results.pkl"
     RECALIBRATE = False  # Set to True to force recalibration
 
 
