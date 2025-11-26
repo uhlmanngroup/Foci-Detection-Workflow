@@ -93,6 +93,23 @@ class Config:
     # Maximum number of parallel workers (None = auto-detect based on CPU cores)
     MAX_WORKERS = None  # Will use min(8, cpu_count - 1)
     
+    # ============ ADAPTIVE PARAMETER SELECTION ============
+    USE_ADAPTIVE_PARAMETERS = True
+    
+    # Calibration phase settings
+    N_CALIBRATION_IMAGES = 5  # Images to use for parameter calibration
+    N_CALIBRATION_PARAMS = 256  # Full parameter sweep for calibration
+    
+    # Production phase settings  
+    N_PRODUCTION_PARAMS = 3  # Reduced to 3 best parameter combos
+    DIVERSITY_WEIGHT = 0.3  # Balance between performance and diversity (0-1)
+    
+    # File paths
+    CALIBRATION_SAVE_PATH = r"Y:\...\calibration_results.pkl"
+    RECALIBRATE = False  # Set to True to force recalibration
+
+
+
     # ===============================================================
     # HELPER METHODS
     # ===============================================================
