@@ -13,7 +13,7 @@ class Config:
     # ===============================================================
     # Path to folder containing microscopy images
     # Use raw string (r'...') to handle Windows backslashes correctly
-    FOLDER_PATH = r'Y:\Group Members\Valentin Aubry\01_Data\Test_Data_mixed_Channels\Data1'
+    FOLDER_PATH = r'Y:\Group Members\Valentin Aubry\01_Data\Test_Data_Andreas_hard'
     
     # ===============================================================
     # PARAMETER SPACE CONFIGURATION
@@ -37,7 +37,7 @@ class Config:
     # ===============================================================
     # Set to True for first few images to calibrate watershed thresholds
     # Set to False for production runs with pre-calibrated thresholds
-    CALIBRATION_MODE = True
+    CALIBRATION_MODE = False
     
     # Number of images to process in calibration mode (0 = all images)
     CALIBRATION_IMAGE_LIMIT = 1
@@ -93,20 +93,21 @@ class Config:
     # Maximum number of parallel workers (None = auto-detect based on CPU cores)
     MAX_WORKERS = None  # Will use min(8, cpu_count - 1)
     
-    # ============ ADAPTIVE PARAMETER SELECTION ============
+    # ============ ADAPTIVE PARAMETER SELECTION ============  # ← ADD THIS
     USE_ADAPTIVE_PARAMETERS = True
-    
+        
     # Calibration phase settings
-    N_CALIBRATION_IMAGES = 5  # Images to use for parameter calibration
+    N_CALIBRATION_IMAGES = 1  # Images to use for parameter calibration
     N_CALIBRATION_PARAMS = 256  # Full parameter sweep for calibration
-    
+        
     # Production phase settings  
-    N_PRODUCTION_PARAMS = 3  # Reduced to 3 best parameter combos
-    DIVERSITY_WEIGHT = 0.3  # Balance between performance and diversity (0-1)
-    
+    N_PRODUCTION_PARAMS = 1  # Reduced to 3 best parameter combos
+    #DIVERSITY_WEIGHT = 0.3  # Balance between performance and diversity (0-1)
+        
     # File paths
     CALIBRATION_SAVE_PATH = r"Y:\Group Members\Valentin Aubry\01_Data\Parameters\Complete_KDE\calibration_results.pkl"
     RECALIBRATE = False  # Set to True to force recalibration
+
 
 
 

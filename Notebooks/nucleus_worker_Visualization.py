@@ -701,7 +701,10 @@ def detect_foci_single_channel(
     nucleus_mask, image, original_image, channel_name, cell_id,
     valid_param_samples, total_iterations, water_threshold_percentile,
     watershed_min_detection_prob=0.0, 
-    well_number=None, position_number=None
+    well_number=None, position_number=None,
+    calibration_mode=False,      # ← ADD
+    calibration_tracker=None,    # ← ADD
+    image_id=None                # ← ADD
 ):
     """
     Detect foci in a single nucleus region for one channel.
@@ -810,6 +813,20 @@ def detect_foci_single_channel(
         foci_counts.append(count)
         for coord in confirmed_coords:
             all_detected_foci.append(tuple(coord))
+
+    # Record calibration data if in calibration mode
+    if calibration_mode and calibration_tracker is not None and image_id is not None:
+        for p_idx in range(len(valid_param_samples)):
+            param_combo = tuple(valid_param_samples[p_idx])
+            calibration_tracker.record_calibration_result(
+                image_id=image_id,
+                cell_id=cell_id,
+                param_combo=param_combo,
+                foci_count=foci_counts[p_idx],
+                detection_prob=100.0,
+                channel=channel_name
+            )
+
     
     if not foci_counts:
         return [], {}, None  # ← CHANGED: Added None
@@ -940,7 +957,12 @@ def process_single_nucleus(args):
      watershed_min_detection_prob,
      min_cv_threshold,
      uniform_contrast_multiplier,
-     enable_texture_filtering) = args
+     enable_texture_filtering,
+     calibration_mode,  # ← ADD
+     tritc_tracker,     # ← ADD
+     fitc_tracker,      # ← ADD
+     image_id           # ← ADD
+    ) = args
     """
     Process one nucleus across all provided channels.
     
@@ -1004,9 +1026,12 @@ def process_single_nucleus(args):
                 valid_param_samples_TRITC,
                 total_iterations_TRITC,
                 water_threshold_percentile_TRITC,
-                watershed_min_detection_prob=watershed_min_detection_prob,  # ← NEW
+                watershed_min_detection_prob=watershed_min_detection_prob,
                 well_number=well_number,
-                position_number=position_number
+                position_number=position_number,
+                calibration_mode=calibration_mode,  # ← ADD
+                calibration_tracker=tritc_tracker,  # ← ADD
+                image_id=image_id                   # ← ADD
             )
 
             
@@ -1039,7 +1064,10 @@ def process_single_nucleus(args):
                 water_threshold_percentile_FITC,
                 watershed_min_detection_prob=watershed_min_detection_prob, 
                 well_number=well_number,
-                position_number=position_number
+                position_number=position_number,
+                calibration_mode=calibration_mode,  # ← ADD
+                calibration_tracker=fitc_tracker,  # ← ADD
+                image_id=image_id                   # ← ADD
             )
                     
             # Add well and position to each focus
@@ -1061,5 +1089,14 @@ def process_single_nucleus(args):
     
     nuclei_data_list = [nucleus_data]
     
-    # ← CHANGED: Now returns 3 items instead of 2
-    return foci_data_list, nuclei_data_list, watershed_data_list
+    # Collect calibration data if in calibration mode
+    calibration_data = []
+    if calibration_mode:
+        # Extract calibration results from trackers
+        if tritc_tracker is not None and len(tritc_tracker.calibration_results) > 0:
+            calibration_data.extend(tritc_tracker.calibration_results)
+        if fitc_tracker is not None and len(fitc_tracker.calibration_results) > 0:
+            calibration_data.extend(fitc_tracker.calibration_results)
+    
+    
+    return foci_data_list, nuclei_data_list, watershed_data_list, calibration_data
