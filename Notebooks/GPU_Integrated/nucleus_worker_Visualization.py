@@ -18,14 +18,15 @@ import os
 from PIL import Image
 from skimage.morphology import binary_erosion, disk
 from scipy.ndimage import distance_transform_edt, label
+from gpu_utils import GPUAccelerator
+
+
+# Initialize GPU accelerator once
+gpu = GPUAccelerator(use_gpu=True)  # Will be imported in workers
 
 # ===============================================================
 # HELPER FUNCTIONS (module-level for multiprocessing)
 # ===============================================================
-
-
-
-
 
 # ===============================================================
 # SAVE GLOBAL VISUALIZATION (INCLUDES REAL WATERSHED)
@@ -236,8 +237,6 @@ def compute_circularity(area, perimeter):
     # This can happen with very small regions where perimeter approximation
     # is less accurate
     return min(circularity, 1.0)
-
-
 
 # ===============================================================
 # TEXTURE-AWARE BACKGROUND WITH NUCLEUS FALLBACK
@@ -706,6 +705,11 @@ def detect_foci_single_channel(
     calibration_tracker=None,    # ← ADD
     image_id=None                # ← ADD
 ):
+
+
+    import time  # ← ADD
+    timing = {}  # ← ADD
+    t_start = time.time()  # ← ADD
     """
     Detect foci in a single nucleus region for one channel.
     Returns: (foci_list, summary_dict, watershed_labels)
@@ -717,12 +721,19 @@ def detect_foci_single_channel(
     
     if isolated_img.max() == 0:
         return [], {}, None  # ← CHANGED: Added None for watershed
+
+
+    timing['preprocessing'] = time.time() - t_start  # ← ADD
+    t1 = time.time()  # ← ADD
     
-    # Apply DoG filter
-    filtered_img = filters.difference_of_gaussians(isolated_img, low_sigma=1, high_sigma=2)
+    # Apply DoG filter (GPU-accelerated)
+    filtered_img = gpu.difference_of_gaussians(isolated_img, low_sigma=1, high_sigma=2)
     filtered_img = np.clip(filtered_img, 0, None)
     filtered_img = exposure.rescale_intensity(filtered_img, in_range='image', 
                                              out_range=(0, isolated_img.max()))
+
+    timing['filtering'] = time.time() - t1  # ← ADD
+    t2 = time.time()  # ← ADD
     
     # Extract parameters
     bright_pcts = valid_param_samples[:, 0]
@@ -737,11 +748,14 @@ def detect_foci_single_channel(
     min_brightness_per_param = np.percentile(pos_pixels, percentile_vals)
     global_min_brightness = np.min(min_brightness_per_param)
     
-    # Find candidate foci
-    candidates_filtered = peak_local_max(filtered_img, min_distance=2, 
-                                        threshold_abs=global_min_brightness)
-    candidates_unfiltered = peak_local_max(isolated_img, min_distance=2, 
-                                          threshold_abs=global_min_brightness)
+    # Find candidate foci (GPU-accelerated)
+    candidates_filtered = gpu.peak_local_max(filtered_img, min_distance=2, 
+                                            threshold_abs=global_min_brightness)
+    candidates_unfiltered = gpu.peak_local_max(isolated_img, min_distance=2, 
+                                              threshold_abs=global_min_brightness)
+
+    timing['peak_detection'] = time.time() - t2  # ← ADD
+    t3 = time.time()  # ← ADD
     
     if len(candidates_filtered) == 0 or len(candidates_unfiltered) == 0:
         return [], {}, None  # ← CHANGED: Added None
@@ -759,6 +773,7 @@ def detect_foci_single_channel(
     # Compute local backgrounds
     min_cv_threshold = 0.20
     
+    # Use optimized vectorized version for background computation
     local_percentiles_unf, texture_info_unf = compute_adaptive_background_texture_nucleus_fallback(
         image=isolated_img,
         coords=unf_yx,
@@ -774,6 +789,14 @@ def detect_foci_single_channel(
         nucleus_mask=nucleus_mask,
         return_texture_info=True
     )
+    
+
+    # Add this debug after the optimization (temporary):
+    print(f"🔍 Background shapes: unf={local_percentiles_unf.shape}, filt={local_percentiles_filt.shape}")
+    print(f"   Sample unf background: {local_percentiles_unf[0, :]}")
+    
+    timing['background_calc'] = time.time() - t3  # ← ADD
+    t4 = time.time()  # ← ADD
         
     # Check if nucleus is uniform (likely false positives)
     nucleus_is_uniform = False
@@ -813,6 +836,10 @@ def detect_foci_single_channel(
         foci_counts.append(count)
         for coord in confirmed_coords:
             all_detected_foci.append(tuple(coord))
+
+    timing['parameter_loop'] = time.time() - t4  # ← ADD
+    timing['iterations'] = len(valid_param_samples)  # ← ADD
+    t5 = time.time()  # ← ADD
 
     # Record calibration data if in calibration mode
     if calibration_mode and calibration_tracker is not None and image_id is not None:
@@ -864,41 +891,58 @@ def detect_foci_single_channel(
     # Rescale filtered image intensity to 0-100 range for consistent thresholding
     filtered_img = exposure.rescale_intensity(filtered_img, in_range='image', out_range=(0, 100))
     
-    # ========== WATERSHED SEGMENTATION WITH DISTANCE TRANSFORM ==========
-    # This approach combines distance transform with compactness constraints to
-    # segment foci while preventing over-segmentation and edge spillage
+    # ========== OPTIMIZATION: Crop to bounding box around foci ==========
+    # Get bounding box with padding
+    y_coords, x_coords = final_coords[:, 0], final_coords[:, 1]
+    pad = 15  # Padding around foci
+    y_min = max(0, y_coords.min() - pad)
+    y_max = min(filtered_img.shape[0], y_coords.max() + pad)
+    x_min = max(0, x_coords.min() - pad)
+    x_max = min(filtered_img.shape[1], x_coords.max() + pad)
     
-    # Erode nucleus mask to create safety margin from edges
-    # This prevents foci from spilling along nucleus boundaries
-    nucleus_mask_eroded = binary_erosion(nucleus_mask, disk(2))
+    # Crop images to bounding box
+    filtered_crop = filtered_img[y_min:y_max, x_min:x_max]
+    isolated_crop = isolated_img[y_min:y_max, x_min:x_max]
+    nucleus_mask_crop = nucleus_mask[y_min:y_max, x_min:x_max]
     
-    # Create marker array from detected foci coordinates
-    # Each seed gets a unique integer label (1, 2, 3, ...)
-    # Markers serve as starting points for watershed basins
-    markers = np.zeros_like(isolated_img, dtype=int)
-    for idx, (y, x) in enumerate(final_coords, start=1):
-        markers[y, x] = idx
+    # Adjust coordinates to cropped space
+    final_coords_crop = final_coords - np.array([y_min, x_min])
     
-    # Define watershed mask combining multiple constraints
-    # Start with pixels above intensity threshold AND within eroded nucleus
-    binary_mask = (filtered_img > water_threshold_percentile) & nucleus_mask_eroded
-    # Then force inclusion of all marker seeds, even if below threshold or in eroded region
-    # This ensures every detected focus gets segmented
-    binary_mask = binary_mask | (markers > 0)
+    # Erode nucleus mask (GPU-accelerated)
+    nucleus_mask_eroded = gpu.binary_erosion(nucleus_mask_crop, disk(2))
     
-    # Compute distance transform
-    # Creates smooth "bowl-shaped" basins centered at high-intensity regions
-    # Distance values are higher at region centers, lower at edges
-    # Negative distance is used because watershed finds basins (low points)
-    distance = ndi.distance_transform_edt(binary_mask)
+    # Create markers in cropped space
+    markers_crop = np.zeros_like(filtered_crop, dtype=int)
+    for idx, (y, x) in enumerate(final_coords_crop, start=1):
+        markers_crop[int(y), int(x)] = idx
     
-    # Run watershed segmentation
-    # -distance: inverted distance map (peaks become valleys for watershed)
-    # markers: seed points defining basin centers
-    # mask: limits where watershed can flow
-    # compactness: penalizes irregular shapes, keeps foci compact and circular
-    water_labels = watershed(-distance, markers, mask=binary_mask, compactness=0.005)
+    # Define watershed mask
+    binary_mask = (filtered_crop > water_threshold_percentile) & nucleus_mask_eroded
+    binary_mask = binary_mask | (markers_crop > 0)
+    
+    # Compute distance transform (GPU-accelerated)
+    distance = gpu.distance_transform(binary_mask)
+    
+    # Run watershed segmentation (GPU-accelerated)
+    water_labels_crop = gpu.watershed_segmentation(distance, markers_crop, binary_mask, compactness=0.005)
+    
+    # Place back into full-size array
+    water_labels = np.zeros_like(isolated_img, dtype=int)
+    water_labels[y_min:y_max, x_min:x_max] = water_labels_crop
 
+
+    timing['watershed'] = time.time() - t5  # ← ADD
+
+    # ← ADD: Print timing for first few nuclei
+    if cell_id <= 3:
+        print(f"\n⏱️  Cell {cell_id} timing ({channel_name}):")
+        for key, val in timing.items():
+            if key == 'iterations':
+                print(f"      {key}: {val}")
+            else:
+                print(f"      {key}: {val:.3f}s")
+
+                
     
     # Measure each focus
     foci_list = []

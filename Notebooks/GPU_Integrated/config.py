@@ -7,6 +7,11 @@ Modify these values to customize the analysis pipeline.
 
 class Config:
     """Configuration container for foci detection analysis."""
+
+
+    # GPU Settings
+    USE_GPU = True  # Set to False to disable GPU
+    GPU_BATCH_CLEAR = True  # Clear GPU memory after each image
     
     # ===============================================================
     # DATA INPUT
@@ -52,7 +57,7 @@ class Config:
     # VISUALIZATION SETTINGS
     # ===============================================================
     # Set to False to disable visualization generation (faster processing)
-    GENERATE_VISUALIZATIONS = True
+    GENERATE_VISUALIZATIONS = False
     
     # Minimum detection probability (0-100%) for a focus to be included
     # in watershed visualization
