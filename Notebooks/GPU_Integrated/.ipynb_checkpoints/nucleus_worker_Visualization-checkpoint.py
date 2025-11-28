@@ -706,10 +706,9 @@ def detect_foci_single_channel(
     image_id=None                # ← ADD
 ):
 
-
-    import time  # ← ADD
-    timing = {}  # ← ADD
-    t_start = time.time()  # ← ADD
+    import time
+    timing = {}
+    t_total = time.time()
     """
     Detect foci in a single nucleus region for one channel.
     Returns: (foci_list, summary_dict, watershed_labels)
@@ -723,8 +722,7 @@ def detect_foci_single_channel(
         return [], {}, None  # ← CHANGED: Added None for watershed
 
 
-    timing['preprocessing'] = time.time() - t_start  # ← ADD
-    t1 = time.time()  # ← ADD
+
     
     # Apply DoG filter (GPU-accelerated)
     filtered_img = gpu.difference_of_gaussians(isolated_img, low_sigma=1, high_sigma=2)
@@ -732,8 +730,7 @@ def detect_foci_single_channel(
     filtered_img = exposure.rescale_intensity(filtered_img, in_range='image', 
                                              out_range=(0, isolated_img.max()))
 
-    timing['filtering'] = time.time() - t1  # ← ADD
-    t2 = time.time()  # ← ADD
+
     
     # Extract parameters
     bright_pcts = valid_param_samples[:, 0]
@@ -754,8 +751,7 @@ def detect_foci_single_channel(
     candidates_unfiltered = gpu.peak_local_max(isolated_img, min_distance=2, 
                                               threshold_abs=global_min_brightness)
 
-    timing['peak_detection'] = time.time() - t2  # ← ADD
-    t3 = time.time()  # ← ADD
+
     
     if len(candidates_filtered) == 0 or len(candidates_unfiltered) == 0:
         return [], {}, None  # ← CHANGED: Added None
@@ -795,8 +791,7 @@ def detect_foci_single_channel(
     print(f"🔍 Background shapes: unf={local_percentiles_unf.shape}, filt={local_percentiles_filt.shape}")
     print(f"   Sample unf background: {local_percentiles_unf[0, :]}")
     
-    timing['background_calc'] = time.time() - t3  # ← ADD
-    t4 = time.time()  # ← ADD
+
         
     # Check if nucleus is uniform (likely false positives)
     nucleus_is_uniform = False
@@ -837,9 +832,6 @@ def detect_foci_single_channel(
         for coord in confirmed_coords:
             all_detected_foci.append(tuple(coord))
 
-    timing['parameter_loop'] = time.time() - t4  # ← ADD
-    timing['iterations'] = len(valid_param_samples)  # ← ADD
-    t5 = time.time()  # ← ADD
 
     # Record calibration data if in calibration mode
     if calibration_mode and calibration_tracker is not None and image_id is not None:
@@ -931,16 +923,7 @@ def detect_foci_single_channel(
     water_labels[y_min:y_max, x_min:x_max] = water_labels_crop
 
 
-    timing['watershed'] = time.time() - t5  # ← ADD
 
-    # ← ADD: Print timing for first few nuclei
-    if cell_id <= 3:
-        print(f"\n⏱️  Cell {cell_id} timing ({channel_name}):")
-        for key, val in timing.items():
-            if key == 'iterations':
-                print(f"      {key}: {val}")
-            else:
-                print(f"      {key}: {val:.3f}s")
 
                 
     
@@ -984,6 +967,17 @@ def detect_foci_single_channel(
         f"{channel_name}_texture_cv": nucleus_cv,
     }
 
+
+    # ========== ADD TIMING END HERE ==========
+    timing['total'] = time.time() - t_total
+    
+    # Print timing for first 2 nuclei only (to avoid spam)
+    if cell_id <= 2:
+        print(f"\n    ⏱️  Cell {cell_id} ({channel_name}): TOTAL = {timing['total']:.3f}s")
+    # ========== END ADD ==========
+
+
+    
     # ← NEW: Return watershed labels for global visualization
     return foci_list, summary, water_labels
 

@@ -98,25 +98,56 @@ class GPUAccelerator:
     
     def difference_of_gaussians(self, image, low_sigma=1, high_sigma=2):
         """GPU-accelerated DoG filter"""
+        import time
+        t_start = time.time()
+        
         if self.use_gpu:
-            image_gpu = self.to_gpu(image)
-            result_gpu = difference_of_gaussians_gpu(image_gpu, low_sigma, high_sigma)
-            return self.to_cpu(result_gpu)
-        else:
-            from skimage.filters import difference_of_gaussians
-            return difference_of_gaussians(image, low_sigma=low_sigma, high_sigma=high_sigma)
+            try:
+                image_gpu = self.to_gpu(image)
+                result_gpu = difference_of_gaussians_gpu(image_gpu, low_sigma, high_sigma)
+                result = self.to_cpu(result_gpu)
+                elapsed = (time.time() - t_start) * 1000
+                if elapsed > 10:  # Only print if > 10ms
+                    print(f"      ⚡ DoG (GPU): {elapsed:.1f}ms")
+                return result
+            except Exception as e:
+                print(f"      ❌ DoG GPU FAILED: {e}")
+                self.use_gpu = False
+        
+        # CPU fallback
+        from skimage.filters import difference_of_gaussians
+        result = difference_of_gaussians(image, low_sigma=low_sigma, high_sigma=high_sigma)
+        elapsed = (time.time() - t_start) * 1000
+        if elapsed > 10:
+            print(f"      🐢 DoG (CPU): {elapsed:.1f}ms")
+        return result
     
     def peak_local_max(self, image, min_distance=2, threshold_abs=0):
         """GPU-accelerated peak detection"""
+        import time
+        t_start = time.time()
+        
         if self.use_gpu:
-            image_gpu = self.to_gpu(image)
-            result_gpu = peak_local_max_gpu(image_gpu, min_distance=min_distance, 
-                                           threshold_abs=threshold_abs)
-            return self.to_cpu(result_gpu)
-        else:
-            from skimage.feature import peak_local_max
-            return peak_local_max(image, min_distance=min_distance, 
-                                 threshold_abs=threshold_abs)
+            try:
+                image_gpu = self.to_gpu(image)
+                result_gpu = peak_local_max_gpu(image_gpu, min_distance=min_distance, 
+                                               threshold_abs=threshold_abs)
+                result = self.to_cpu(result_gpu)
+                elapsed = (time.time() - t_start) * 1000
+                if elapsed > 10:
+                    print(f"      ⚡ Peak detection (GPU): {elapsed:.1f}ms")
+                return result
+            except Exception as e:
+                print(f"      ❌ Peak detection GPU FAILED: {e}")
+                self.use_gpu = False
+        
+        from skimage.feature import peak_local_max
+        result = peak_local_max(image, min_distance=min_distance, 
+                             threshold_abs=threshold_abs)
+        elapsed = (time.time() - t_start) * 1000
+        if elapsed > 10:
+            print(f"      🐢 Peak detection (CPU): {elapsed:.1f}ms")
+        return result
     
     def watershed_segmentation(self, distance, markers, mask, compactness=0.005):
         """GPU-accelerated watershed"""
@@ -131,24 +162,54 @@ class GPUAccelerator:
     
     def distance_transform(self, binary_mask):
         """GPU-accelerated distance transform"""
+        import time
+        t_start = time.time()
+        
         if self.use_gpu:
-            mask_gpu = self.to_gpu(binary_mask)
-            result_gpu = distance_transform_gpu(mask_gpu)
-            return self.to_cpu(result_gpu)
-        else:
-            from scipy.ndimage import distance_transform_edt
-            return distance_transform_edt(binary_mask)
+            try:
+                mask_gpu = self.to_gpu(binary_mask)
+                result_gpu = distance_transform_gpu(mask_gpu)
+                result = self.to_cpu(result_gpu)
+                elapsed = (time.time() - t_start) * 1000
+                if elapsed > 10:
+                    print(f"      ⚡ Distance transform (GPU): {elapsed:.1f}ms")
+                return result
+            except Exception as e:
+                print(f"      ❌ Distance transform GPU FAILED: {e}")
+                self.use_gpu = False
+        
+        from scipy.ndimage import distance_transform_edt
+        result = distance_transform_edt(binary_mask)
+        elapsed = (time.time() - t_start) * 1000
+        if elapsed > 10:
+            print(f"      🐢 Distance transform (CPU): {elapsed:.1f}ms")
+        return result
     
     def binary_erosion(self, mask, footprint):
         """GPU-accelerated binary erosion"""
+        import time
+        t_start = time.time()
+        
         if self.use_gpu:
-            mask_gpu = self.to_gpu(mask)
-            footprint_gpu = self.to_gpu(footprint)
-            result_gpu = binary_erosion_gpu(mask_gpu, structure=footprint_gpu)
-            return self.to_cpu(result_gpu)
-        else:
-            from skimage.morphology import binary_erosion
-            return binary_erosion(mask, footprint)
+            try:
+                mask_gpu = self.to_gpu(mask)
+                footprint_gpu = self.to_gpu(footprint)
+                result_gpu = binary_erosion_gpu(mask_gpu, structure=footprint_gpu)
+                result = self.to_cpu(result_gpu)
+                elapsed = (time.time() - t_start) * 1000
+                if elapsed > 10:
+                    print(f"      ⚡ Binary erosion (GPU): {elapsed:.1f}ms")
+                return result
+            except Exception as e:
+                print(f"      ❌ Binary erosion GPU FAILED: {e}")
+                self.use_gpu = False
+        
+        from skimage.morphology import binary_erosion
+        result = binary_erosion(mask, footprint)
+        elapsed = (time.time() - t_start) * 1000
+        if elapsed > 10:
+            print(f"      🐢 Binary erosion (CPU): {elapsed:.1f}ms")
+        return result
     
     def clear_cache(self):
         """Clear GPU memory cache"""
