@@ -1,0 +1,121 @@
+# ===============================================================
+# Foci Detection Workflow - Configuration File
+# ===============================================================
+# All user-configurable parameters are defined here.
+# Modify these values to customize the analysis pipeline.
+# ===============================================================
+
+# GPU Settings
+gpu:
+  use_gpu: true              # Set to false to disable GPU
+  gpu_batch_clear: true      # Clear GPU memory after each image
+
+# ===============================================================
+# DATA INPUT
+# ===============================================================
+data:
+  # Path to folder containing microscopy images
+  # Use forward slashes (/) or double backslashes (\\) for Windows paths
+  folder_path: "Y:/Group Members/Valentin Aubry/01_Data/Test_Data_Andreas_hard"
+
+# ===============================================================
+# PARAMETER SPACE CONFIGURATION
+# ===============================================================
+parameter_space:
+  # Set to true when you want to generate a new parameter space
+  # Set to false when you want to use an existing one
+  generate_new: false
+  
+  # Paths to pre-computed parameter spaces (used when generate_new is false)
+  tritc_path: "Y:/Group Members/Valentin Aubry/01_Data/Parameters/Complete_KDE/TRITC_parameter_space"
+  fitc_path: "Y:/Group Members/Valentin Aubry/01_Data/Parameters/Complete_KDE/FITC_parameter_space"
+  
+  # Number of parameter samples to use (via farthest point sampling)
+  n_samples: 256
+  
+  # Number of Sobol samples to generate before filtering (must be power of 2)
+  n_sobol_samples: 65536  # 2^16
+
+# ===============================================================
+# CALIBRATION VS PRODUCTION MODE
+# ===============================================================
+calibration:
+  # Set to true for first few images to calibrate watershed thresholds
+  # Set to false for production runs with pre-calibrated thresholds
+  mode: false
+  
+  # Number of images to process in calibration mode (0 = all images)
+  image_limit: 1
+  
+  # Manual watershed threshold values (used when mode is false)
+  # These should be determined during calibration and then hardcoded here
+  # Values typically range from 0-100 (percentile of filtered image brightness)
+  manual_threshold_tritc: 26.0
+  manual_threshold_fitc: 26.0
+
+# ===============================================================
+# VISUALIZATION SETTINGS
+# ===============================================================
+visualization:
+  # Set to false to disable visualization generation (faster processing)
+  generate: false
+  
+  # Minimum detection probability (0-100%) for a focus to be included
+  # in watershed visualization
+  # Examples:
+  #   0   = Show ALL detected foci (even if only detected once)
+  #   50  = Show foci detected in at least 50% of parameter combinations
+  #   80  = Show only highly robust foci (detected in 80%+ of combinations)
+  watershed_min_detection_prob: 0.0
+
+# ===============================================================
+# TEXTURE-BASED FILTERING CONFIGURATION
+# ===============================================================
+texture_filtering:
+  # Enable/disable texture-based filtering entirely
+  enable: true
+  
+  # Minimum coefficient of variation (CV) threshold for nucleus texture
+  # CV = std_dev / mean_intensity
+  # Lower CV = more uniform (less texture variation)
+  # Higher CV = more spotty (more texture variation)
+  # Examples:
+  #   0.15 = Very uniform nuclei (minimal texture)
+  #   0.20 = Moderately uniform (default)
+  #   0.25 = Spotty nuclei (high texture variation)
+  min_cv_threshold: 0.20
+  
+  # Contrast multiplier for uniform nuclei
+  # When a nucleus is detected as uniform (low texture), we apply stricter
+  # filtering by multiplying the contrast threshold
+  # Examples:
+  #   1.0 = No change (treat uniform nuclei the same as textured ones)
+  #   1.5 = Require 50% higher contrast for uniform nuclei (default)
+  #   2.0 = Require 2x higher contrast for uniform nuclei (very strict)
+  uniform_contrast_multiplier: 1
+
+# ===============================================================
+# PARALLEL PROCESSING
+# ===============================================================
+parallel:
+  # Maximum number of parallel workers (null = auto-detect based on CPU cores)
+  # Will use min(8, cpu_count - 1) if set to null
+  max_workers: null
+
+# ===============================================================
+# ADAPTIVE PARAMETER SELECTION
+# ===============================================================
+adaptive_parameters:
+  # Enable adaptive parameter selection
+  use_adaptive: true
+  
+  # Calibration phase settings
+  n_calibration_images: 1     # Images to use for parameter calibration
+  n_calibration_params: 256   # Full parameter sweep for calibration
+  
+  # Production phase settings
+  n_production_params: 1      # Reduced to best parameter combos
+  
+  # File paths
+  calibration_save_path: "Y:/Group Members/Valentin Aubry/01_Data/Parameters/Complete_KDE/calibration_results.pkl"
+  recalibrate: false          # Set to true to force recalibration
