@@ -1,0 +1,112 @@
+# ===============================================================
+# DATA INPUT
+# ===============================================================
+data:
+  folder_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Test_Data_Andreas_hard"
+
+# ===============================================================
+# PARAMETER SPACE CONFIGURATION
+# ===============================================================
+parameter_space:
+  generate_new: false
+  tritc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\TRITC_parameter_space"
+  fitc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\FITC_parameter_space"
+  n_samples: 256
+  n_sobol_samples: 65536
+
+# ===============================================================
+# ADAPTIVE PARAMETER SELECTION
+# ===============================================================
+adaptive_parameters:
+  enabled: true
+  n_calibration_images: 1
+  n_calibration_params: 256
+  n_production_params: 1
+  calibration_save_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\calibration_results.pkl"
+  recalibrate: false
+  
+  # Load pre-optimized parameters
+  load_reduced_parameters: false
+  reduced_tritc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\reduced_params_TRITC.pkl"
+  reduced_fitc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\reduced_params_FITC.pkl"
+  
+  # ============================================================
+  # RANDOM SEED - GLOBAL SETTING
+  # ============================================================
+  # This single seed controls ALL randomization in the pipeline:
+  #   1. Image order randomization (for calibration)
+  #   2. Resume capability (ensures same order across runs)
+  #   3. Any other random sampling
+  #
+  # IMPORTANT FOR RESUME:
+  #   - Keep this SAME across runs to resume processing
+  #   - If changed, image order will be different
+  #   - Set to null for different order each run (no resume)
+  #
+  # Example workflow:
+  #   Run 1: random_seed: 42, max_images: 5
+  #   Run 2: random_seed: 42, resume_from_image: 5  ← SAME seed!
+  #
+  randomize_calibration_order: true
+  random_seed: 42
+
+# ===============================================================
+# WATERSHED THRESHOLDING
+# ===============================================================
+watershed:
+  # Options: "manual_interactive", "manual_preset"
+  mode: "manual_preset"
+  
+  # Number of images to analyze for threshold determination
+  n_images_for_threshold: 5
+  
+  # Pre-configured thresholds (used when skip_interactive_config = true)
+  manual_threshold_tritc: 20.0
+  manual_threshold_fitc: 20.0
+  
+  # Set to true to skip interactive configuration and use preset values
+  skip_interactive_config: false
+
+# ===============================================================
+# VISUALIZATION SETTINGS
+# ===============================================================
+visualization:
+  # Options: "all", "none", "specific"
+  mode: "all"
+  
+  # Used when mode = "specific"
+  specific_images:
+    - []
+  #  - "00029_00035"
+  #  - "00044_00021"
+  
+  specific_basenames:
+    - []
+   # - "ATR1_24h--W00032--P00015--Z00000--T00000--"
+  
+  watershed_min_detection_prob: 0.0
+
+# ===============================================================
+# TEXTURE-BASED FILTERING
+# ===============================================================
+texture_filtering:
+  enabled: true
+  min_cv_threshold: 0.20
+  uniform_contrast_multiplier: 1
+
+# ===============================================================
+# PROCESSING
+# ===============================================================
+processing:
+  max_workers: null  # null = auto-detect
+  
+  # ============================================================
+  # IMAGE PROCESSING LIMITS (NEW)
+  # ============================================================
+  # Limit number of images to process (null = process all)
+  # Example: Set to 5 to process only 5 images for testing
+  max_images: 3
+  
+  # Resume from image N (0 = start from beginning)
+  # Example: If you processed 5 images, set to 5 to continue from image 6
+  resume_from_image: 0

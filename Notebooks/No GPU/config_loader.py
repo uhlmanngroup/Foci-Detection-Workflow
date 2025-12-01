@@ -142,11 +142,13 @@ class Config:
     
     @property
     def SPECIFIC_VISUALIZATION_IMAGES(self) -> list:
-        return self._config['visualization'].get('specific_images', [])
+        result = self._config['visualization'].get('specific_images', [])
+        return result if result is not None else []
     
     @property
     def SPECIFIC_VISUALIZATION_BASENAMES(self) -> list:
-        return self._config['visualization'].get('specific_basenames', [])
+        result = self._config['visualization'].get('specific_basenames', [])
+        return result if result is not None else []
     
     @property
     def WATERSHED_MIN_DETECTION_PROB(self) -> float:
@@ -178,6 +180,14 @@ class Config:
     @property
     def MAX_WORKERS(self) -> Optional[int]:
         return self._config['processing']['max_workers']
+
+    @property
+    def MAX_IMAGES(self) -> Optional[int]:
+        return self._config['processing'].get('max_images', None)
+    
+    @property
+    def RESUME_FROM_IMAGE(self) -> int:
+        return self._config['processing'].get('resume_from_image', 0)
     
     # ===============================================================
     # HELPER METHODS
