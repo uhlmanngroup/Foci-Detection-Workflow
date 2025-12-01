@@ -1,0 +1,83 @@
+# ===============================================================
+# DATA INPUT
+# ===============================================================
+data:
+  folder_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Test_Data_Andreas_hard"
+
+# ===============================================================
+# PARAMETER SPACE CONFIGURATION
+# ===============================================================
+parameter_space:
+  generate_new: false
+  tritc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\TRITC_parameter_space"
+  fitc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\FITC_parameter_space"
+  n_samples: 256
+  n_sobol_samples: 65536
+
+# ===============================================================
+# ADAPTIVE PARAMETER SELECTION
+# ===============================================================
+adaptive_parameters:
+  enabled: true
+  n_calibration_images: 1
+  n_calibration_params: 256
+  n_production_params: 1
+  calibration_save_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\calibration_results.pkl"
+  recalibrate: false
+  
+  # Load pre-optimized parameters
+  load_reduced_parameters: false
+  reduced_tritc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\reduced_params_TRITC.pkl"
+  reduced_fitc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\reduced_params_FITC.pkl"
+  
+  # Randomize image order for calibration
+  randomize_calibration_order: true
+  random_seed: 42  # null for random seed each run
+
+# ===============================================================
+# WATERSHED THRESHOLDING
+# ===============================================================
+watershed:
+  # Options: "manual_interactive", "manual_preset"
+  mode: "manual_interactive"
+  
+  # Number of images to analyze for threshold determination
+  n_images_for_threshold: 5
+  
+  # Pre-configured thresholds (used when skip_interactive_config = true)
+  manual_threshold_tritc: 26.0
+  manual_threshold_fitc: 26.0
+  
+  # Set to true to skip interactive configuration and use preset values
+  skip_interactive_config: false
+
+# ===============================================================
+# VISUALIZATION SETTINGS
+# ===============================================================
+visualization:
+  # Options: "all", "none", "specific"
+  mode: "none"
+  
+  # Used when mode = "specific"
+  specific_images:
+    - "00032_00015"
+    - "00044_00021"
+  
+  specific_basenames:
+    - "ATR1_24h--W00032--P00015--Z00000--T00000--"
+  
+  watershed_min_detection_prob: 0.0
+
+# ===============================================================
+# TEXTURE-BASED FILTERING
+# ===============================================================
+texture_filtering:
+  enabled: true
+  min_cv_threshold: 0.20
+  uniform_contrast_multiplier: 1
+
+# ===============================================================
+# PARALLEL PROCESSING
+# ===============================================================
+processing:
+  max_workers: null  # null = auto-detect

@@ -37,6 +37,79 @@ class AdaptiveParameterSelector:
         self.selected_params = None
         
     
+
+    def save_reduced_parameters(self, tritc_path: str, fitc_path: str):
+        """
+        Save optimized parameters separately for easy reloading.
+        
+        Parameters:
+        -----------
+        tritc_path : str
+            Path to save TRITC parameters
+        fitc_path : str
+            Path to save FITC parameters
+        """
+        if self.selected_params is None:
+            raise ValueError("No parameters selected yet. Run select_optimal_parameters first.")
+        
+        import pickle
+        import os
+        
+        # Save TRITC
+        if 'TRITC' in self.selected_params:
+            os.makedirs(os.path.dirname(tritc_path), exist_ok=True)
+            with open(tritc_path, 'wb') as f:
+                pickle.dump(self.selected_params['TRITC'], f)
+            print(f"✅ Saved reduced TRITC parameters to {tritc_path}")
+        
+        # Save FITC
+        if 'FITC' in self.selected_params:
+            os.makedirs(os.path.dirname(fitc_path), exist_ok=True)
+            with open(fitc_path, 'wb') as f:
+                pickle.dump(self.selected_params['FITC'], f)
+            print(f"✅ Saved reduced FITC parameters to {fitc_path}")
+
+
+    def load_reduced_parameters(self, tritc_path: str, fitc_path: str) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Load pre-optimized parameters.
+        
+        Parameters:
+        -----------
+        tritc_path : str
+            Path to TRITC parameters
+        fitc_path : str
+            Path to FITC parameters
+            
+        Returns:
+        --------
+        tuple : (tritc_params, fitc_params) as numpy arrays
+        """
+        import pickle
+        
+        # Load TRITC
+        with open(tritc_path, 'rb') as f:
+            tritc_params = pickle.load(f)
+        print(f"✅ Loaded {len(tritc_params)} TRITC parameters from {tritc_path}")
+        
+        # Load FITC
+        with open(fitc_path, 'rb') as f:
+            fitc_params = pickle.load(f)
+        print(f"✅ Loaded {len(fitc_params)} FITC parameters from {fitc_path}")
+        
+        # Store in selected_params for consistency
+        self.selected_params = {
+            'TRITC': tritc_params,
+            'FITC': fitc_params
+        }
+        
+        return np.array(tritc_params), np.array(fitc_params)            
+
+
+
+
+
+
     def record_calibration_result(self, image_id, cell_id, param_combo, 
                                    foci_count, detection_prob, channel):
         """
