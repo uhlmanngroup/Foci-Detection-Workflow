@@ -72,7 +72,7 @@ watershed:
 # ===============================================================
 visualization:
   # Options: "all", "none", "specific"
-  mode: "all"
+  mode: "none"
   
   # Used when mode = "specific"
   specific_images:

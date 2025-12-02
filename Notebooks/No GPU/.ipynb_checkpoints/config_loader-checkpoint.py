@@ -22,7 +22,7 @@ class Config:
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Config file not found: {config_path}")
         
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             self._config = yaml.safe_load(f)
         
         # Validate required sections

@@ -648,7 +648,7 @@ class ParameterSpaceGenerator:
                      (self.param_ranges['percentile_val'][1] - self.param_ranges['percentile_val'][0])
             
             # Color by correctness
-            correct_mask = (nucleus_data['foci_count'] >= min_count) & \ (nucleus_data['foci_count'] <= max_count)
+            correct_mask = (nucleus_data['foci_count'] >= min_count) & (nucleus_data['foci_count'] <= max_count)
             
             # Plot incorrect points (light gray, smaller)
             if (~correct_mask).any():
