@@ -700,30 +700,62 @@ def detect_foci_single_channel(
     valid_param_samples, total_iterations, water_threshold_percentile,
     watershed_min_detection_prob=0.0, 
     well_number=None, position_number=None,
-    calibration_mode=False,      # ← ADD
-    calibration_tracker=None,    # ← ADD
-    image_id=None                # ← ADD
+    calibration_mode=False,
+    calibration_tracker=None,
+    image_id=None
 ):
-
-
-    import time  # ← ADD
-    timing = {}  # ← ADD
-    t_start = time.time()  # ← ADD
     """
     Detect foci in a single nucleus region for one channel.
     Returns: (foci_list, summary_dict, watershed_labels)
     
     NEW: Now returns watershed_labels for global visualization
     """
+    import time
+    timing = {}
+    t_start = time.time()
+    
+    # ============================================================
+    # ✅ NEW: HELPER FUNCTION FOR EARLY EXITS
+    # ============================================================
+    def return_empty(reason=""):
+        """Return empty results but with COMPLETE nucleus summary."""
+        
+        empty_summary = {
+            # Nucleus properties
+            f"{channel_name}_nucleus_cv": 0.0,
+            f"{channel_name}_texture_applied": False,
+            
+            # Foci intensity statistics (None when no foci)
+            f"{channel_name}_mean_foci_intensity": None,
+            f"{channel_name}_std_foci_intensity": None,
+            f"{channel_name}_min_foci_intensity": None,
+            f"{channel_name}_max_foci_intensity": None,
+            
+            # Parameter sweep statistics
+            f"{channel_name}_mean_foci": 0.0,
+            f"{channel_name}_std_foci": 0.0,
+            f"{channel_name}_min_foci": 0,
+            f"{channel_name}_max_foci": 0,
+        }
+        
+        if reason:
+            print(f"      Cell {cell_id} ({channel_name}): {reason} - returning empty")
+        
+        return [], empty_summary, None
+        
+    # ============================================================
+    # START OF MAIN DETECTION LOGIC
+    # ============================================================
+    
     isolated_img = img_as_float(image.copy())
     isolated_img[~nucleus_mask] = 0
     
+    # ✅ CHANGED: Was "return [], {}, None"
     if isolated_img.max() == 0:
-        return [], {}, None  # ← CHANGED: Added None for watershed
+        return return_empty("No signal in isolated nucleus")
 
-
-    timing['preprocessing'] = time.time() - t_start  # ← ADD
-    t1 = time.time()  # ← ADD
+    timing['preprocessing'] = time.time() - t_start
+    t1 = time.time()
     
     # Apply DoG filter
     filtered_img = filters.difference_of_gaussians(isolated_img, low_sigma=1, high_sigma=2)
@@ -731,8 +763,8 @@ def detect_foci_single_channel(
     filtered_img = exposure.rescale_intensity(filtered_img, in_range='image', 
                                              out_range=(0, isolated_img.max()))
 
-    timing['filtering'] = time.time() - t1  # ← ADD
-    t2 = time.time()  # ← ADD
+    timing['filtering'] = time.time() - t1
+    t2 = time.time()
     
     # Extract parameters
     bright_pcts = valid_param_samples[:, 0]
@@ -741,8 +773,10 @@ def detect_foci_single_channel(
     
     # Use original_image for global percentile calculations
     pos_pixels = original_image[original_image > 0]
+    
+    # ✅ CHANGED: Was "return [], {}, None"
     if pos_pixels.size == 0:
-        return [], {}, None  # ← CHANGED: Added None
+        return return_empty("No positive pixels in original image")
     
     min_brightness_per_param = np.percentile(pos_pixels, percentile_vals)
     global_min_brightness = np.min(min_brightness_per_param)
@@ -753,11 +787,12 @@ def detect_foci_single_channel(
     candidates_unfiltered = peak_local_max(isolated_img, min_distance=2, 
                                           threshold_abs=global_min_brightness)
 
-    timing['peak_detection'] = time.time() - t2  # ← ADD
-    t3 = time.time()  # ← ADD
+    timing['peak_detection'] = time.time() - t2
+    t3 = time.time()
     
+    # ✅ CHANGED: Was "return [], {}, None"
     if len(candidates_filtered) == 0 or len(candidates_unfiltered) == 0:
-        return [], {}, None  # ← CHANGED: Added None
+        return return_empty("No candidates found")
     
     # Extract coordinates and intensities
     filt_yx = np.asarray(candidates_filtered, dtype=int)
@@ -789,13 +824,12 @@ def detect_foci_single_channel(
         return_texture_info=True
     )
     
-
-    # Add this debug after the optimization (temporary):
+    # Debug output (can remove later)
     print(f"🔍 Background shapes: unf={local_percentiles_unf.shape}, filt={local_percentiles_filt.shape}")
     print(f"   Sample unf background: {local_percentiles_unf[0, :]}")
     
-    timing['background_calc'] = time.time() - t3  # ← ADD
-    t4 = time.time()  # ← ADD
+    timing['background_calc'] = time.time() - t3
+    t4 = time.time()
         
     # Check if nucleus is uniform (likely false positives)
     nucleus_is_uniform = False
@@ -808,9 +842,20 @@ def detect_foci_single_channel(
         if nucleus_cv < min_cv_threshold:
             print(f"    ⚠️ Cell {cell_id}: Low texture (CV={nucleus_cv:.3f}) - applying stricter filters")
             nucleus_is_uniform = True
-            contrast_multiplier = 1  # was 1.5 : Require 50% higher contrast for uniform nuclei
+            contrast_multiplier = 1
     else:
-        nucleus_cv = 0.0  # ← Fallback for safety (should never happen)
+        # ❌ This is a bug if it happens!
+        print(f"    ❌ ERROR: Cell {cell_id} - texture_info_unf['nucleus_stats'] is empty!")
+        print(f"       texture_info_unf: {texture_info_unf}")
+        
+        # Calculate CV manually as fallback
+        nucleus_pixels = original_image[nucleus_mask]
+        if len(nucleus_pixels) > 0 and np.mean(nucleus_pixels) > 0:
+            nucleus_cv = float(np.std(nucleus_pixels) / np.mean(nucleus_pixels))
+            print(f"       Calculated CV manually: {nucleus_cv:.3f}")
+        else:
+            nucleus_cv = 0.0
+            print(f"       ⚠️ Cannot calculate CV (no pixels or zero mean)")
     
     distances = cdist(unf_yx, filt_yx)
     tolerance = 2
@@ -836,9 +881,9 @@ def detect_foci_single_channel(
         for coord in confirmed_coords:
             all_detected_foci.append(tuple(coord))
 
-    timing['parameter_loop'] = time.time() - t4  # ← ADD
-    timing['iterations'] = len(valid_param_samples)  # ← ADD
-    t5 = time.time()  # ← ADD
+    timing['parameter_loop'] = time.time() - t4
+    timing['iterations'] = len(valid_param_samples)
+    t5 = time.time()
 
     # Record calibration data if in calibration mode
     if calibration_mode and calibration_tracker is not None and image_id is not None:
@@ -852,10 +897,10 @@ def detect_foci_single_channel(
                 detection_prob=100.0,
                 channel=channel_name
             )
-
     
+    # ✅ CHANGED: Was "return [], {}, None"
     if not foci_counts:
-        return [], {}, None  # ← CHANGED: Added None
+        return return_empty("No foci counts recorded")
     
     # Calculate statistics
     foci_detection_count = Counter(all_detected_foci)
@@ -868,32 +913,29 @@ def detect_foci_single_channel(
     # WATERSHED: Use ALL detected foci from parameter sweep
     # ===============================================================
     # Filter foci by detection probability threshold
-    # This uses the accumulated foci_detection_count from the parameter sweep
     watershed_foci = []
     for coord, count in foci_detection_count.items():
         detection_prob = (count / total_iterations) * 100
         if detection_prob >= watershed_min_detection_prob:
             watershed_foci.append(coord)
     
+    # ✅ CHANGED: Was "return [], {}, None"
     if len(watershed_foci) == 0:
-        # No foci passed the threshold
-        return [], {}, None
+        return return_empty("No foci passed detection threshold")
     
     # Convert to numpy array for watershed
     final_coords = np.array(watershed_foci)
     
+    # ✅ CHANGED: Was "return [], {}, None"
     if len(final_coords) == 0:
-        return [], {}, None  # ← CHANGED: Added None
-
-
+        return return_empty("No final coordinates")
     
     # Rescale filtered image intensity to 0-100 range for consistent thresholding
     filtered_img = exposure.rescale_intensity(filtered_img, in_range='image', out_range=(0, 100))
     
     # ========== OPTIMIZATION: Crop to bounding box around foci ==========
-    # Get bounding box with padding
     y_coords, x_coords = final_coords[:, 0], final_coords[:, 1]
-    pad = 15  # Padding around foci
+    pad = 25
     y_min = max(0, y_coords.min() - pad)
     y_max = min(filtered_img.shape[0], y_coords.max() + pad)
     x_min = max(0, x_coords.min() - pad)
@@ -918,21 +960,36 @@ def detect_foci_single_channel(
     # Define watershed mask
     binary_mask = (filtered_crop > water_threshold_percentile) & nucleus_mask_eroded
     binary_mask = binary_mask | (markers_crop > 0)
+
+    # ✅ NEW: Dilate marker regions slightly to ensure connectivity
+    from scipy.ndimage import binary_dilation
+    marker_mask = markers_crop > 0
+    dilated_markers = binary_dilation(marker_mask, structure=disk(1))
+    binary_mask = binary_mask | dilated_markers
     
-    # Compute distance transform (on smaller region!)
+    # Compute distance transform
     distance = ndi.distance_transform_edt(binary_mask)
     
-    # Run watershed segmentation (on smaller region - much faster!)
+    # Run watershed segmentation
     water_labels_crop = watershed(-distance, markers_crop, mask=binary_mask, compactness=0.005)
+
+    # ✅ DIAGNOSTIC: Check if any markers were lost
+    markers_found = np.unique(markers_crop[markers_crop > 0])
+    labels_found = np.unique(water_labels_crop[water_labels_crop > 0])
+
+    if len(labels_found) < len(markers_found):
+        lost_markers = set(markers_found) - set(labels_found)
+        print(f"⚠️ WARNING Cell {cell_id} ({channel_name}): {len(lost_markers)} foci lost in watershed!")
+        print(f"   Lost marker IDs: {lost_markers}")
+        print(f"   Expected: {len(markers_found)}, Got: {len(labels_found)}")
     
     # Place back into full-size array
     water_labels = np.zeros_like(isolated_img, dtype=int)
     water_labels[y_min:y_max, x_min:x_max] = water_labels_crop
 
+    timing['watershed'] = time.time() - t5
 
-    timing['watershed'] = time.time() - t5  # ← ADD
-
-    # ← ADD: Print timing for first few nuclei
+    # Print timing for first few nuclei
     if cell_id <= 3:
         print(f"\n⏱️  Cell {cell_id} timing ({channel_name}):")
         for key, val in timing.items():
@@ -940,10 +997,10 @@ def detect_foci_single_channel(
                 print(f"      {key}: {val}")
             else:
                 print(f"      {key}: {val:.3f}s")
-
-                
     
-    # Measure each focus
+    # ============================================================
+    # MEASURE EACH FOCUS
+    # ============================================================
     foci_list = []
     
     for idx, (y, x) in enumerate(final_coords):
@@ -974,16 +1031,42 @@ def detect_foci_single_channel(
             'channel': channel_name
         })
     
+    # ============================================================
+    # ✅ BUILD COMPLETE SUMMARY (ALL FIELDS PRESENT)
+    # ============================================================
     
+    # Calculate foci intensity statistics
+    if len(foci_list) > 0:
+        foci_intensities = [f['foci_mean_intensity'] for f in foci_list]
+        mean_foci_intensity = float(np.mean(foci_intensities))
+        std_foci_intensity = float(np.std(foci_intensities))
+        min_foci_intensity = float(np.min(foci_intensities))
+        max_foci_intensity = float(np.max(foci_intensities))
+    else:
+        mean_foci_intensity = None
+        std_foci_intensity = None
+        min_foci_intensity = None
+        max_foci_intensity = None
+    
+    # Build complete summary dictionary
     summary = {
-        f"{channel_name}_mean_foci": mean_foci,
-        f"{channel_name}_std_foci": std_foci,
-        f"{channel_name}_min_foci": min_foci,
-        f"{channel_name}_max_foci": max_foci,
-        f"{channel_name}_texture_cv": nucleus_cv,
+        # Nucleus properties
+        f"{channel_name}_nucleus_cv": float(nucleus_cv),
+        f"{channel_name}_texture_applied": nucleus_is_uniform,
+        
+        # Foci intensity statistics
+        f"{channel_name}_mean_foci_intensity": mean_foci_intensity,
+        f"{channel_name}_std_foci_intensity": std_foci_intensity,
+        f"{channel_name}_min_foci_intensity": min_foci_intensity,
+        f"{channel_name}_max_foci_intensity": max_foci_intensity,
+        
+        # Parameter sweep statistics (keep these!)
+        f"{channel_name}_mean_foci": float(mean_foci),
+        f"{channel_name}_std_foci": float(std_foci),
+        f"{channel_name}_min_foci": int(min_foci),
+        f"{channel_name}_max_foci": int(max_foci),
     }
 
-    # ← NEW: Return watershed labels for global visualization
     return foci_list, summary, water_labels
 
 
