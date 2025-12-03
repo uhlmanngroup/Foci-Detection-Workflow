@@ -858,12 +858,12 @@ def detect_foci_single_channel(
         
         # Calculate CV manually as fallback
         nucleus_pixels = original_image[nucleus_mask]
-        if len(nucleus_pixels) > 0 and np.mean(nucleus_pixels) > 0:
-            nucleus_cv = float(np.std(nucleus_pixels) / np.mean(nucleus_pixels))
-            print(f"       Calculated CV manually: {nucleus_cv:.3f}")
+        mean_val = np.mean(nucleus_pixels)
+
+        if len(nucleus_pixels) > 0 and mean_val > 1e-6:  # ✅ FIXED
+            nucleus_cv = float(np.std(nucleus_pixels) / mean_val)
         else:
             nucleus_cv = 0.0
-            print(f"       ⚠️ Cannot calculate CV (no pixels or zero mean)")
     
     distances = cdist(unf_yx, filt_yx)
     tolerance = 2
