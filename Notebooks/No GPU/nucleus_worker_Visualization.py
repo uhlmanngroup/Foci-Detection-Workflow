@@ -300,7 +300,15 @@ def compute_adaptive_background_texture_nucleus_fallback(
             median_intensity = np.median(nuc_pixels)
             
             # Coefficient of Variation (CV) = std/mean
-            cv = std_intensity / mean_intensity if mean_intensity > 0 else 0
+            # ✅ FIX: Use proper epsilon threshold (1e-6) instead of exact 0
+            # This prevents floating-point precision issues with dim TRITC images
+            # where mean_intensity rounds to 0.0 after img_as_float() normalization
+            if mean_intensity > 1e-6:  # Use epsilon threshold instead of exact 0
+                cv = std_intensity / mean_intensity
+            # Nucleus has negligible signal - CV is undefined
+            # Setting to 0 is appropriate (indicates no texture to measure)
+            else:
+                cv = 0.0
             
             # Additional texture metrics
             p10 = np.percentile(nuc_pixels, 10)
@@ -320,8 +328,8 @@ def compute_adaptive_background_texture_nucleus_fallback(
                 'p90': p90,
                 'percentile_range': percentile_range,
                 'num_pixels': len(nuc_pixels),
-                'is_spotty': cv > 0.25,  # Can adjust threshold
-                'is_uniform': cv < 0.15   # Very uniform
+                'is_spotty': cv > 0.25 and mean_intensity > 1e-6,  # Can adjust threshold
+                'is_uniform': cv < 0.15 and mean_intensity > 1e-6   # Very uniform
             }
     
     # Pre-compute annulus masks
