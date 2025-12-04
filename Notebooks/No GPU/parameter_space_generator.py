@@ -65,22 +65,183 @@ class ParameterSpaceGenerator:
         else:
             print(f"✓ Added nucleus {cell_id} with acceptable range: {min_count}-{max_count} foci")
     
-    def interactive_nucleus_selection(self, masks, channel_image, num_nuclei=10):
+    def interactive_nucleus_selection(self, masks, channel_image, num_nuclei=10, 
+                                      mask_data_paths=None, channel_data_paths=None):
         """
         Interactively select and annotate nuclei with visual feedback.
         Streamlined workflow with minimal scrolling.
+        
+        NEW: Can now change pictures during selection with 'next'/'prev'/'picture' commands.
+        
+        Parameters:
+        -----------
+        masks : numpy array or list
+            Current mask image (will be updated when picture changes)
+        channel_image : numpy array or list
+            Current channel image (will be updated when picture changes)
+        num_nuclei : int
+            Target number of nuclei to select
+        mask_data_paths : list, optional
+            List of ALL mask file paths (for picture navigation)
+        channel_data_paths : list, optional
+            List of ALL channel image file paths (for picture navigation)
         """
         from skimage.segmentation import find_boundaries
+        import os
+        import re
+        import imageio
+        
+        # ========================================================================
+        # PICTURE NAVIGATION SETUP (NEW!)
+        # ========================================================================
+        
+        # Track current picture index if navigation is enabled
+        picture_navigation_enabled = (mask_data_paths is not None and 
+                                       channel_data_paths is not None)
+        current_picture_idx = 0
+        
+        # Load initial picture
+        if picture_navigation_enabled:
+            masks = np.load(mask_data_paths[current_picture_idx], allow_pickle=True)
+            channel_image = imageio.imread(channel_data_paths[current_picture_idx])
+        
+        def extract_well_position(filepath):
+            """Extract well and position from filename."""
+            if filepath is None:
+                return "?", "?"
+            basename = os.path.basename(filepath)
+            well_match = re.search(r'--W(\d+)', basename)
+            pos_match = re.search(r'--P(\d+)', basename)
+            well = well_match.group(1) if well_match else "?"
+            pos = pos_match.group(1) if pos_match else "?"
+            return well, pos
+        
+        def change_picture(direction):
+            """Change to next/previous picture."""
+            nonlocal current_picture_idx, masks, channel_image
+            
+            if not picture_navigation_enabled:
+                print("❌ Picture navigation not available (no paths provided)")
+                return False
+            
+            if direction == 'next':
+                if current_picture_idx < len(mask_data_paths) - 1:
+                    current_picture_idx += 1
+                else:
+                    print("❌ Already at last picture!")
+                    return False
+            elif direction == 'prev':
+                if current_picture_idx > 0:
+                    current_picture_idx -= 1
+                else:
+                    print("❌ Already at first picture!")
+                    return False
+            
+            # Load new picture
+            masks = np.load(mask_data_paths[current_picture_idx], allow_pickle=True)
+            channel_image = imageio.imread(channel_data_paths[current_picture_idx])
+            
+            well, pos = extract_well_position(mask_data_paths[current_picture_idx])
+            print(f"→ Switched to picture {current_picture_idx + 1}/{len(mask_data_paths)}: Well {well}, Position {pos}")
+            return True
+        
+        def choose_specific_picture():
+            """Choose picture by index or well+position."""
+            nonlocal current_picture_idx, masks, channel_image
+            
+            if not picture_navigation_enabled:
+                print("❌ Picture navigation not available")
+                return
+            
+            print("\n" + "="*60)
+            print("🔍 CHOOSE PICTURE")
+            print("="*60)
+            print("Options:")
+            print("  1. Enter picture index (e.g., '5')")
+            print("  2. Enter well+position (e.g., 'w50p18' or 'W0050P0018')")  # ← Moved up
+            print("  3. Type 'list' to see all pictures")
+            print("  4. Type 'cancel' to go back")
+            print("="*60)
+            
+            while True:
+                choice = input("\n➤ ").strip()
+                
+                if choice.lower() == 'cancel':
+                    print("Cancelled.")
+                    return
+                
+                if choice.lower() == 'list':
+                    print("\n📋 Available pictures:")
+                    for idx, path in enumerate(mask_data_paths):
+                        well, pos = extract_well_position(path)
+                        marker = "← CURRENT" if idx == current_picture_idx else ""
+                        print(f"  [{idx:3d}] Well {well}, Position {pos} {marker}")
+                    continue
+                
+                # ================================================================
+                # ✅ Try to parse well+position format (w50p18)
+                # ================================================================
+                well_pos_match = re.match(r'w(\d+)p(\d+)', choice.lower())
+                if well_pos_match:
+                    target_well = well_pos_match.group(1).zfill(5)  # Pad to 5 digits
+                    target_pos = well_pos_match.group(2).zfill(5)   # Pad to 5 digits
+                    
+                    # Search for matching picture
+                    for idx, path in enumerate(mask_data_paths):
+                        well, pos = extract_well_position(path)
+                        if well == target_well and pos == target_pos:
+                            current_picture_idx = idx
+                            masks = np.load(mask_data_paths[current_picture_idx], allow_pickle=True)
+                            channel_image = imageio.imread(channel_data_paths[current_picture_idx])
+                            print(f"✅ Switched to Well {well}, Position {pos}")
+                            return
+                    
+                    # Not found
+                    print(f"❌ No picture found for Well {target_well}, Position {target_pos}")
+                    continue
+                
+                # ================================================================
+                # Try as picture index
+                # ================================================================
+                if choice.isdigit():
+                    idx = int(choice)
+                    
+                    # Check if it's a valid index
+                    if 0 <= idx < len(mask_data_paths):
+                        current_picture_idx = idx
+                        masks = np.load(mask_data_paths[current_picture_idx], allow_pickle=True)
+                        channel_image = imageio.imread(channel_data_paths[current_picture_idx])
+                        well, pos = extract_well_position(mask_data_paths[current_picture_idx])
+                        print(f"✅ Switched to picture #{idx}: Well {well}, Position {pos}")
+                        return
+                    else:
+                        print(f"❌ Invalid index (must be 0-{len(mask_data_paths)-1})")
+                        continue
+                else:
+                    print("❌ Invalid format. Use: index (e.g., '5') or 'w50p18'")
+                    continue
+        
+        # ========================================================================
+        # ORIGINAL WORKFLOW STARTS HERE
+        # ========================================================================
         
         print("\n" + "="*60)
         print("INTERACTIVE VISUAL NUCLEUS SELECTION")
         print("="*60)
         print(f"\nGoal: Select and annotate up to {num_nuclei} nuclei")
+        if picture_navigation_enabled:
+            well, pos = extract_well_position(mask_data_paths[current_picture_idx])
+            print(f"Current picture: {current_picture_idx + 1}/{len(mask_data_paths)} - Well {well}, Position {pos}")
         print("\nWorkflow:")
         print("  1. View full overview with all nucleus IDs")
         print("  2. Select a nucleus by entering its ID")
         print("  3. View detailed zoom of that nucleus")
         print("  4. Enter foci count or choose different nucleus")
+        if picture_navigation_enabled:
+            print("\n📸 Picture Navigation (NEW!):")
+            print("  • 'next' or 'n' - Next picture")
+            print("  • 'prev' or 'p' - Previous picture")
+            print("  • 'picture' or 'pic' - Choose specific picture")
         print("="*60)
         
         channel_image = img_as_float(channel_image)
@@ -100,7 +261,14 @@ class ParameterSpaceGenerator:
             
             # ✅ STEP 2: Choose a nucleus to examine
             while True:
-                nucleus_input = input("\n🔍 Enter nucleus ID to examine (or 'generate' to show overview, 'done' to finish): ").strip()
+                # Show current picture info if navigation enabled
+                if picture_navigation_enabled:
+                    well, pos = extract_well_position(mask_data_paths[current_picture_idx])
+                    print(f"📸 Current: Picture {current_picture_idx + 1}/{len(mask_data_paths)}, Well {well}, Pos {pos}")
+                
+                nucleus_input = input("\n🔍 Enter nucleus ID to examine (or 'generate' to show overview, 'done' to finish"
+                                    + (", 'next'/'prev'/'picture' to change picture" if picture_navigation_enabled else "") 
+                                    + "): ").strip()
                 
                 if nucleus_input.lower() == 'done':
                     if selected_count > 0:
@@ -114,6 +282,33 @@ class ParameterSpaceGenerator:
                 elif nucleus_input.lower() == 'generate':
                     print("\n📊 Regenerating full overview...")
                     plt.close('all')
+                    # Update nucleus IDs for current picture
+                    all_nucleus_ids = np.unique(masks)[1:]
+                    self._show_all_nuclei_overview(masks, channel_image, used_ids)
+                    continue
+                
+                # NEW: Picture navigation commands
+                elif nucleus_input.lower() in ['next', 'n']:
+                    if change_picture('next'):
+                        plt.close('all')
+                        all_nucleus_ids = np.unique(masks)[1:]
+                        channel_image = img_as_float(channel_image)
+                        self._show_all_nuclei_overview(masks, channel_image, used_ids)
+                    continue
+                
+                elif nucleus_input.lower() in ['prev', 'p']:
+                    if change_picture('prev'):
+                        plt.close('all')
+                        all_nucleus_ids = np.unique(masks)[1:]
+                        channel_image = img_as_float(channel_image)
+                        self._show_all_nuclei_overview(masks, channel_image, used_ids)
+                    continue
+                
+                elif nucleus_input.lower() in ['picture', 'pic']:
+                    choose_specific_picture()
+                    plt.close('all')
+                    all_nucleus_ids = np.unique(masks)[1:]
+                    channel_image = img_as_float(channel_image)
                     self._show_all_nuclei_overview(masks, channel_image, used_ids)
                     continue
                 
@@ -154,7 +349,7 @@ class ParameterSpaceGenerator:
                 
                 else:
                     try:
-                        # ✅ NEW: Parse range format "2-4" or single value "3"
+                        # ✅ Parse range format "2-4" or single value "3"
                         if '-' in action_input:
                             # Range format: "2-4"
                             parts = action_input.split('-')
