@@ -1,691 +1,238 @@
 # ===============================================================
 # FOCI DETECTION PIPELINE CONFIGURATION
 # ===============================================================
-# This file controls the automated microscopy foci detection workflow.
-# The pipeline detects and quantifies fluorescent foci (bright spots) in 
-# multi-channel microscopy images using adaptive parameter optimization.
+# Controls automated detection and quantification of fluorescent foci
+# in multi-channel microscopy images.
 #
-# WORKFLOW OVERVIEW:
-# ==================
-#   Phase 1: SETUP
-#     1. Load images from folder_path (TRITC, FITC, Cy5, DAPI channels)
-#     2. Load or generate parameter spaces (valid detection parameters)
-#   
-#   Phase 2: CALIBRATION (optional, if adaptive_parameters.enabled = true)
-#     3. Test multiple parameter combinations on first N images
-#     4. Select 1-3 optimal parameter sets that work best across images
-#   
-#   Phase 3: PRODUCTION
-#     5. Detect foci in all images using optimized parameters
-#     6. Apply watershed segmentation to separate touching foci
-#     7. Measure foci properties (area, intensity, location)
-#   
-#   Phase 4: OUTPUT
-#     8. Export results to CSV files (one row per focus, one row per nucleus)
-#     9. Optional: Generate visualization images showing detected foci
+# WORKFLOW: Load images → Calibrate parameters (optional) → 
+#           Detect foci → Measure properties → Export to CSV
 #
-# KEY CONCEPTS:
-# =============
-#   - Parameter Space: A validated set of detection thresholds (brightness,
-#     contrast, percentile) that successfully detect foci without false positives
-#   
-#   - Adaptive Parameters: System learns optimal settings from calibration images
-#     instead of using fixed thresholds for all images (compensates for batch effects)
-#   
-#   - Watershed Threshold: Brightness cutoff that defines where foci regions end
-#     and background begins (used to separate touching foci into individual objects)
-#
-# EDITING THIS FILE:
-# ==================
-#   - Lines starting with # are comments (ignored by the program)
-#   - Indentation matters! Keep the same spacing structure
-#   - Paths with backslashes need double backslashes: C:\\Data or forward slashes: C:/Data
-#   - Set values to 'null' (without quotes) to use automatic/default behavior
-#   - Boolean values: true or false (lowercase, no quotes)
-#
-# TROUBLESHOOTING:
-# ================
-#   - "File not found" errors: Check folder_path and parameter space paths exist
-#   - Memory errors: Reduce max_workers or max_images
-#   - Too many/few foci detected: Adjust watershed thresholds or recalibrate
-#   - Resume not working: Ensure random_seed is the SAME across runs
+# For detailed explanations, see README.md and SOP documentation.
 # ===============================================================
 
 
 # ===============================================================
 # DATA INPUT
 # ===============================================================
-# Specifies where your microscopy images are stored.
-#
-# EXPECTED FILE STRUCTURE:
-# ------------------------
-# Your folder should contain files with this naming pattern:
-#   - *_TRITC_SEM.tif      (TRITC channel - red fluorescence)
-#   - *_FITC_SEM.tif       (FITC channel - green fluorescence)
-#   - *_Cy5_SEM.tif        (Cy5 channel - far-red fluorescence)
-#   - *_DAPI_SEM.tif       (DAPI channel - nucleus staining)
-#   - *_DAPI_SEM_seg.npy   (Nucleus segmentation masks - from Cellpose)
-#
-# The * represents your experiment identifier (e.g., "ATR1_24h--W00032--P00015")
-#
-# CRITICAL: All 5 files must exist for each image position, with matching names.
-# ===============================================================
 data:
-  # Absolute path to your image directory
-  # Example Windows: "C:\\Users\\YourName\\Data\\Experiment1"
-  # Example Mac/Linux: "/Users/YourName/Data/Experiment1"
+  # Path to folder containing microscopy images
+  # Required files per image position:
+  #   *_TRITC_SEM.tif, *_FITC_SEM.tif, *_Cy5_SEM.tif
+  #   *_DAPI_SEM.tif, *_DAPI_SEM_seg.npy
   folder_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Test_Data_Andreas_hard"
 
 
 # ===============================================================
-# PARAMETER SPACE CONFIGURATION
+# PARAMETER SPACE
 # ===============================================================
-# Parameter spaces define VALID combinations of detection settings.
-# Think of this as a "quality control filter" - only parameter combinations
-# that successfully detected foci in training data are included.
-#
-# HOW PARAMETER SPACES WORK:
-# --------------------------
-# During parameter space generation, you manually annotate up to 10 nuclei(recommendation: 2-3) with
-# known foci counts. The system then tests thousands of parameter combinations
-# and keeps only those that correctly detect your annotated counts.
-#
-# This creates a 3D "valid region" defined by:
-#   - Brightness percentile: Selected Background percentile to which potential foci get compared to
-#   - Contrast threshold: How much brighter than selected Background percentile foci need to be (e.g., 2.5x)
-#   - Global percentile: Absolute minimum brightness across entire image for initial foci detection
-#
-# WHEN TO REGENERATE:
-# -------------------
-#   - For every new Dataset
-#   Maybe after Testing:
-#   - New microscope or imaging settings
-#   - Different cell type or staining protocol
-#   - Detection quality issues (too many false positives/negatives)
-
-#
-# WHEN TO REUSE:
-# --------------
-#   - When continuing/re-runnung the same Dataset
-#   Maybe after Testing:
-#   - Same experimental setup, just different samples/timepoints
-#   - Works well and no detection issues
+# Defines valid detection parameter combinations.
+# Generate new spaces when starting a new experiment type.
+# Reuse existing spaces for same imaging conditions.
 # ===============================================================
 parameter_space:
-  # Generate NEW parameter spaces (requires manual annotation)?
-  # - true:  Run interactive annotation workflow, then generate spaces
-  # - false: Load existing parameter spaces from tritc_path and fitc_path
-  #
-  # SET TO TRUE if:
-  #   - First time running on this data type
-  #   - Detection quality is poor with current spaces
-  #   - You changed microscope settings or staining
+  # Generate new parameter spaces via interactive annotation?
+  # true:  Manually annotate nuclei, generate new spaces
+  # false: Load existing spaces from paths below
   generate_new: false
   
-  # Path to TRITC parameter space directory (contains hull and bounds files)
-  # This is TRITC-specific because TRITC images have different characteristics
-  # than FITC (different signal-to-noise, brightness distributions, etc.)
+  # Paths to existing parameter space directories
   tritc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\TRITC_parameter_space"
-  
-  # Path to FITC parameter space directory
-  # Kept separate from TRITC because FITC typically has different optimal parameters
   fitc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\FITC_parameter_space"
   
-  # Number of parameter combinations to test during calibration/production
-  # Higher values = more thorough search but slower processing
-  #
-  # Technical note: Uses farthest-point sampling to select diverse, well-spaced
-  # combinations from the valid parameter space
-  #
-  # Typical values(needs testing):
-  #   - 64:  Fast, good for testing
-  #   - 256: Balanced (recommended)
-  #   - 512: Very thorough, slower
+  # Number of parameter combinations to test
+  # Uses farthest-point sampling from valid parameter space
+  # Higher = more thorough but slower
   n_samples: 256
   
-  # Number of quasi-random samples used to fill the parameter space
-  # This is an INTERNAL value used during parameter space generation
-  #
-  # Technical note: Uses Sobol sequence (low-discrepancy sampling) to explore
-  # parameter space more uniformly than random sampling
-  #
-  # Higher values = denser parameter space coverage but longer generation time
-  # Must be a power of 2 (e.g., 16384, 32768, 65536, 131072)
-  #
-  # Increase if you see "Insufficient valid points" errors during generation
+  # Internal: Sobol samples for parameter space generation
+  # Must be power of 2 (e.g., 32768, 65536, 131072)
+  # Increase if you see "Insufficient valid points" errors
   n_sobol_samples: 65536
 
 
 # ===============================================================
 # ADAPTIVE PARAMETER SELECTION
 # ===============================================================
-# Adaptive mode uses machine learning to find optimal parameters automatically.
-# Instead of testing 256 parameters on EVERY image, it:
-#   1. Tests 256 parameters on first N images (calibration)
-#   2. Learns which 1-3 parameters work best
-#   3. Uses only those 1-3 on remaining images (production)
-#
-# BENEFITS:
-# ---------
-#   - Much faster: 1-3 parameters vs 256 per image after calibration
-#   - Adapts to your specific data: accounts for image quality variations
-#   - Reproducible: can save and reuse optimized parameters
-#
-# CALIBRATION VS PRODUCTION:
-# --------------------------
-# Calibration phase (first n_calibration_images):
-#   - Tests n_calibration_params (usually 256) combinations
-#   - Records which parameters give consistent foci counts
-#   - Analyzes variance across nuclei and images
-#
-# Production phase (remaining images):
-#   - Uses only n_production_params (usually 1-3) best parameters
-#   - Much faster per image (3 iterations vs 256)
-#
-# WHEN TO USE REDUCED PARAMETERS:
-# --------------------------------
-# After running calibration once, you can save the optimized parameters
-# and load them directly for future runs (skips calibration phase).
-# This is useful for:
-#   - Continueing a data analysis
-#   Needs Testing if it works:
-#   - Large datasets where you don't want to recalibrate every time
-#   - Ensuring exact same parameters across multiple processing runs
-#   - Batch processing where first few images are representative
+# Learns optimal parameters from calibration images, then uses
+# only the best 1-3 parameters for remaining images.
+# Result: Much faster processing after calibration phase.
 # ===============================================================
 adaptive_parameters:
   # Enable adaptive parameter selection?
-  # - true:  Use calibration → production workflow
-  # - false: Use all n_samples parameters on every image (slower, but better data)
+  # true:  Calibrate → optimize → production (faster)
+  # false: Use all n_samples on every image (slower, more thorough)
   enabled: true
   
-  # Number of images to use for calibration phase
-  # These images will test ALL n_calibration_params to learn optimal settings
-  #
-  # Recommendations:
-  #   - 1-3:  Fast, works if images are very consistent
-  #   - 5-10: Balanced, handles moderate variability (recommended)
-  #   - 15+:  Very robust, good for highly variable datasets
-  #
-  # Note: First N images are selected based on randomize_calibration_order setting
+  # Number of images for calibration phase
+  # These images test all n_calibration_params to find optimal settings
   n_calibration_images: 1
   
-  # Number of parameters to test DURING calibration
-  # This is usually the same as parameter_space.n_samples
-  #
-  # Note: if n_calibration_params < n_samples: The parameter iterations are selected in order of how they were created with farthest point 
-  # sampling, meaning that they will be naturally spread out, but not optimally.
-  # n_calibration_params > n_samples = ERROR
+  # Number of parameters to test during calibration
+  # Usually same as parameter_space.n_samples
+  # If less: uses first N from farthest-point sampling (suboptimal but valid)
   n_calibration_params: 256
   
-  # Number of parameters to use in PRODUCTION (after calibration)
-  # These are the "best" parameters selected from calibration results
-  #
-  # Recommendations(needs testing):
-  #   - 1:  Fastest, use if calibration shows very consistent optimal parameter
-  #   - 2:  Balanced, provides redundancy
-  #   - 3:  Most robust, covers slight variations (recommended)
-  #   - 4+: Rarely needed unless high image variability
-  #
-  # Selection strategy: Picks parameters that:
-  #   1. Give counts closest to mean across all calibration nuclei
-  #   2. Have low variance (consistent results)
-  #   3. Are spatially diverse in parameter space (cover different detection strategies)
-  #
-  # Note: More params = bigger diversity, the program will automatically increase the diversity with more parameters selected
+  # Number of optimized parameters to use in production
+  # More parameters = higher diversity coverage
+  # Algorithm auto-adjusts diversity weighting based on this value
   n_production_params: 1
   
-  # Where to save calibration results (for inspection/debugging)
-  # Contains:
-  #   - All tested parameter combinations
-  #   - Foci counts per nucleus per parameter
-  #   - Performance metrics
-  #   - Selected optimal parameters
+  # Where to save calibration results for inspection
   calibration_save_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\calibration_results.pkl"
   
-  # Force recalibration even if calibration results exist?
-  # - true:  Always run calibration phase (ignores existing results)
-  # - false: Skip calibration if results file exists
+  # ============================================================
+  # CALIBRATION CONTROL
+  # ============================================================
+  # recalibrate + load_reduced_parameters behavior:
   #
-  # Set to true if:
-  #   - You changed imaging conditions
-  #   - Previous calibration gave poor results
-  #   - Testing different calibration settings
+  # false + false: Normal workflow (calibrate, then optimize)
+  # false + true:  Skip calibration (load saved optimal parameters)
+  # true  + false: Force fresh calibration (ignore existing results)
+  # true  + true:  ⚠️ Contradictory (not recommended)
+  # ============================================================
+  
+  # Force fresh calibration even if results exist?
+  # Set true if previous calibration was poor or settings changed
   recalibrate: false
   
-  # ============================================================
-  # LOAD PRE-OPTIMIZED PARAMETERS (SKIP CALIBRATION)
-  # ============================================================
-  # After running calibration once, you can save the final optimized parameters
-  # and load them directly in future runs. This completely skips calibration.
-  #
-  # WORKFLOW:
-  # ---------
-  # First run (with calibration):
-  #   1. Set load_reduced_parameters: false
-  #   2. Set enabled: true, n_calibration_images: 5
-  #   3. Run pipeline → calibration happens → parameters saved automatically
-  #
-  # Subsequent runs (skip calibration):
-  #   1. Set load_reduced_parameters: true
-  #   2. Run pipeline → uses saved parameters immediately
-  #
-  # WHEN TO USE:
-  # ------------
-  #   - Processing additional images from same experiment
-  #   - Reprocessing with different visualization settings
-  #   - Batch processing where early images are representative
-  #
-  # WHEN NOT TO USE:
-  # ----------------
-  #   - Different imaging conditions or microscope
-  #   - New cell type or staining protocol
-  #   - First time analyzing this data type
-  # ============================================================
-  
-  # Load pre-optimized parameters from previous calibration?
-  # - true:  Skip calibration, use parameters from reduced_tritc_path and reduced_fitc_path
-  # - false: Run calibration phase normally
+  # Load pre-saved optimal parameters from previous calibration?
+  # Completely skips calibration phase
+  # Requires valid .pkl files at paths below
   load_reduced_parameters: false
-  
-  # Path to TRITC optimized parameters (saved from previous calibration)
-  # File contains the final 1-3 parameter combinations for TRITC channel
+
+
+  # Paths to saved optimal parameters (auto-generated after calibration)
+  # Contains ONLY the final 1-3 best parameter combinations (not full calibration data)
+  # Only used when load_reduced_parameters: true
   reduced_tritc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\reduced_params_TRITC.pkl"
-  
-  # Path to FITC optimized parameters (saved from previous calibration)
-  # File contains the final 1-3 parameter combinations for FITC channel
   reduced_fitc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\reduced_params_FITC.pkl"
   
   # ============================================================
-  # RANDOM SEED - CRITICAL FOR REPRODUCIBILITY AND RESUME
+  # RANDOM SEED
   # ============================================================
-  # This single seed controls ALL randomization in the pipeline.
-  #
-  # WHAT IT AFFECTS:
-  # ----------------
-  #   1. Image processing order (if randomize_calibration_order = true)
-  #   2. Which images are used for calibration
-  #   3. Parameter sampling during generation
-  #   4. Any other stochastic processes
-  #
-  # WHY THIS MATTERS FOR RESUME:
-  # ----------------------------
-  # When you resume processing (e.g., after processing 10 images, then continuing
-  # from image 11), the random seed MUST be the same. Otherwise:
-  #   - Image order will be different
-  #   - Image 11 in run 1 ≠ image 11 in run 2
-  #   - You'll reprocess different images or skip some entirely
-  #
-  # EXAMPLE WORKFLOW:
-  # -----------------
-  # Run 1: Process first 10 images
-  #   random_seed: 42
-  #   max_images: 10
-  #   resume_from_image: 0
-  #   → Processes images in order determined by seed 42
-  #
-  # Run 2: Continue from image 11
-  #   random_seed: 42  ← SAME SEED!
-  #   max_images: 10
-  #   resume_from_image: 10
-  #   → Continues with images 11-20 in same sequence
-  #
-  # IMPORTANT:
-  # ----------
-  #   - Use a fixed seed (e.g., 42) for production runs
-  #   - Change seed only for testing different image selections
-  #   - Set to null for truly random order each run (disables resume)
+  # Controls all randomization (image order, parameter sampling, etc.)
+  # CRITICAL: Must stay constant across resume runs or image order changes
   # ============================================================
   
-  # Randomize the order images are processed?
-  # - true:  Shuffle image order using random_seed (ensures diverse calibration set)
-  # - false: Process images in alphabetical filename order
-  #
-  # Recommendation: true (avoids calibrating only on sequential wells/positions)
+  # Randomize image processing order?
+  # true:  Shuffle using random_seed (ensures diverse calibration set)
+  # false: Process alphabetically by filename
   randomize_calibration_order: true
   
-  # Random seed for reproducibility (any integer, or null for random)
-  # KEEP THIS VALUE CONSTANT if you plan to use resume functionality
-  #
-  # Common values: 42, 123, 2024 (any integer works, 42 is tradition)
+  # Fixed seed for reproducibility (null = random each run)
+  # Keep constant for resume functionality to work correctly
   random_seed: 42
 
 
 # ===============================================================
 # WATERSHED THRESHOLDING
 # ===============================================================
-# Watershed segmentation separates touching foci into individual objects.
-# Think of it like water flooding the image from bright peaks (foci centers):
-# the water stops at boundaries defined by the threshold.
-#
-# HOW IT WORKS:
-# -------------
-# 1. Foci detection finds candidate bright spots
-# 2. Watershed algorithm "grows" each focus region outward from its center
-# 3. Growing stops when pixel brightness falls below the threshold
-# 4. Result: Each focus gets its own labeled region (even if foci touch)
-#
-# THRESHOLD MEANING:
-# ------------------
-# The threshold is a brightness value (0-100 scale after preprocessing):
-#   - Lower threshold (e.g., 15): Foci regions grow larger, may merge
-#   - Higher threshold (e.g., 40): Foci regions are smaller, better separation
-#   - Too low: False merging of nearby foci
-#   - Too high: Real foci get split or disappear
-#
-# CHOOSING THRESHOLDS:
-# --------------------
-# The threshold depends on your image characteristics:
-#   - Bright, well-defined foci: Can use higher threshold (30-40)
-#   - Dim or diffuse foci: Need lower threshold (15-25)
-#   - High background: Need higher threshold to avoid noise
-#
-# TWO MODES:
-# ----------
-# manual_interactive: Analyze first N images, choose threshold interactively
-#   - Shows brightness distribution histogram
-#   - Highlights suggested range based on percentiles
-#   - You pick optimal value by visual inspection
-#   - Threshold then applied to ALL images
-#
-# manual_preset: Use fixed thresholds defined below
-#   - Fastest option if you already know good values
-#   - Use after running interactive mode once
+# Separates touching foci into individual objects.
+# Threshold = brightness cutoff where foci regions stop growing.
 # ===============================================================
 watershed:
-  # Watershed threshold selection mode
-  # Options:
-  #   "manual_interactive": Analyze images, show histogram, get user input
-  #   "manual_preset":      Use manual_threshold_tritc and manual_threshold_fitc values below
-  #
-  # Recommendation:
-  #   - First time: Use "manual_interactive" to determine optimal values
-  #   - Subsequent runs: Use "manual_preset" with values from interactive session
+  # Threshold selection mode
+  # "manual_interactive": Analyze images, show histogram, get user input
+  # "manual_preset":      Use fixed thresholds below
   mode: "manual_preset"
   
-  # Number of images to analyze for threshold determination (interactive mode only)
+  # Number of images to analyze in interactive mode
   # More images = better representation of dataset variability
-  #
-  # Recommendations:
-  #   - 3-5:  Fast, works for consistent datasets
-  #   - 5-10: Balanced, handles moderate variability (recommended)
-  #   - 10+:  Very robust, good for highly variable imaging conditions
-  #
-  # Note: Images are selected from the beginning of processing order
-  # (affected by randomize_calibration_order setting)
   n_images_for_threshold: 5
   
-  # Pre-configured threshold for TRITC channel (0-100 scale)
-  # Used when mode = "manual_preset" or skip_interactive_config = true
-  #
-  # This is the brightness cutoff for watershed segmentation of TRITC foci.
-  # Pixels above this value are considered part of a focus region.
-  #
-  # Typical values:
-  #   - 15-25: Dim foci or high background
-  #   - 25-35: Standard imaging conditions (recommended starting point)
-  #   - 35-45: Very bright, well-defined foci
-  #
-  # To find optimal value:
-  #   1. Set mode: "manual_interactive"
-  #   2. Run pipeline once
-  #   3. Note the value you chose
-  #   4. Set that value here and switch to mode: "manual_preset"
+  # Fixed thresholds for preset mode (0-100 scale)
+  # Pixels above threshold = part of focus region
   manual_threshold_tritc: 20.0
-  
-  # Pre-configured threshold for FITC channel (0-100 scale)
-  # Same logic as TRITC, but FITC often needs different threshold
-  # (FITC tends to have different signal-to-noise characteristics)
   manual_threshold_fitc: 20.0
   
-  # Skip interactive configuration even in interactive mode?
-  # - true:  Always use manual_threshold_* values (never show histogram)
-  # - false: Show histogram and prompt for input (in interactive mode)
-  #
-  # This is useful if you want mode="manual_interactive" workflow but
-  # already decided on thresholds (e.g., for batch processing)
+  # Skip interactive prompts even in interactive mode?
+  # Useful for batch processing with predetermined thresholds
   skip_interactive_config: false
 
 
 # ===============================================================
-# VISUALIZATION SETTINGS
+# VISUALIZATION
 # ===============================================================
-# Control which images get visualization outputs (overlays showing detected foci).
-# Visualizations are saved as PNG files showing:
-#   - Foci locations as colored dots on grayscale background
-#   - Watershed segmentation regions as colored areas
-#
-# WARNING: Generating visualizations for ALL images can:
-#   - Take significant disk space (4 images × ~2MB each × N images)
-#   - Slow down processing
-#
-# RECOMMENDATION: Use "specific" mode to visualize only problem images or
-# representative samples for quality control.
+# Controls generation of overlay images showing detected foci.
+# WARNING: "all" mode generates 4 images per position (large storage).
 # ===============================================================
 visualization:
-  # Visualization generation mode
-  # Options:
-  #   "all":      Generate visualizations for EVERY image (slow, large storage)
-  #   "none":     No visualizations (fastest, recommended for production)
-  #   "specific": Only generate for images listed in specific_images or specific_basenames
-  #
-  # Recommendation:
-  #   - Production runs: "none"
-  #   - Quality control: "specific" with 5-10 representative images
-  #   - Debugging: "all" (on small test subset)
+  # Visualization mode
+  # "all":      Every image (slow, large storage)
+  # "none":     No visualizations (fastest)
+  # "specific": Only images in lists below
   mode: "none"
   
-  # List of specific images to visualize (used when mode = "specific")
-  # Format: List of "WELL_POSITION" strings (zero-padded)
-  #
-  # Example:
-  #   specific_images:
-  #     - "00029_00035"  # Well 29, Position 35
-  #     - "00044_00021"  # Well 44, Position 21
-  #
-  # Empty list ([]) means no images selected by well/position
-  # Leave as [[]] if using specific_basenames instead
+  # Specific images by well/position (format: "WELL_POSITION")
+  # Example: ["00029_00035", "00044_00021"]
+  # Use [[]] for empty list
   specific_images:
     - []
   
-  # List of specific images by base filename (used when mode = "specific")
-  # Format: List of filename prefixes (everything before channel name)
-  #
-  # Example:
-  #   specific_basenames:
-  #     - "ATR1_24h--W00032--P00015--Z00000--T00000--"
-  #     - "ATR2_8h--W00041--P00005--Z00000--T00000--"
-  #
-  # Empty list ([]) means no images selected by basename
-  # Leave as [[]] if using specific_images instead
+  # Specific images by filename prefix
+  # Example: ["ATR1_24h--W00032--P00015--Z00000--T00000--"]
+  # Use [[]] for empty list
   specific_basenames:
     - []
   
-  # Minimum detection probability for foci to appear in watershed visualization (0-100%)
-  # Foci detected by fewer than this % of parameter combinations are excluded
-  #
-  # Technical note: During parameter sweep, each focus is detected by some
-  # fraction of the tested parameters. This sets the inclusion threshold.
-  #
-  # Values:
-  #   - 0:    Show all detected foci (may include noise)
-  #   - 10-25: Reasonable filtering
-  #   - 50+:  Only show highly confident foci (may miss real foci)
-  #
-  # Recommendation: 0 for watershed visualization (shows full segmentation)
+  # Minimum detection confidence for watershed visualization (0-100%)
+  # Foci detected by fewer than this % of parameters are excluded
+  # 0 = show all detected foci
   watershed_min_detection_prob: 0.0
 
 
 # ===============================================================
-# TEXTURE-BASED FILTERING
+# TEXTURE FILTERING
 # ===============================================================
-# Some nuclei have uniformly bright staining (high mean intensity but low texture).
-# These can produce false positive foci detections because the algorithm mistakes
-# uniform brightness for real foci.
-#
-# HOW IT WORKS:
-# -------------
-# For each nucleus, calculate Coefficient of Variation (CV):
-#   CV = standard_deviation / mean_intensity
-#
-# High CV = "spotty" nucleus with real bright spots (likely real foci)
-# Low CV = uniformly bright nucleus (likely false positives)
-#
-# If CV < min_cv_threshold:
-#   - Nucleus flagged as "uniform"
-#   - Stricter detection criteria applied (higher contrast threshold)
-#   - Reduces false positives from bright, featureless nuclei
-#
-# WHEN TO ENABLE:
-# ---------------
-#   - You see many false positives in uniformly bright nuclei
-#   - Background staining is uneven across nuclei
-#   - Some nuclei are overexposed
-#
-# WHEN TO DISABLE:
-# ----------------
-#   - Clean images with consistent background
-#   - You're already getting good detection without it
-#   - You trust your parameter space to handle variability
+# Reduces false positives in uniformly bright nuclei.
+# Applies stricter criteria to nuclei with low texture variance.
 # ===============================================================
 texture_filtering:
-  # Enable texture-aware filtering?
-  # - true:  Apply stricter filters to uniformly bright nuclei
-  # - false: Treat all nuclei equally
+  # Enable texture-based filtering?
   enabled: true
   
-  # Minimum CV threshold to consider a nucleus "textured" (0.0 - 1.0)
-  # Nuclei with CV below this are considered "uniform" and filtered more strictly
-  #
-  # Technical note: CV = std / mean
-  #   - CV = 0.10 means std is 10% of mean (very uniform)
-  #   - CV = 0.30 means std is 30% of mean (spotty/textured)
-  #
-  # Typical values:
-  #   - 0.15: Aggressive filtering (flags more nuclei as uniform)
-  #   - 0.20: Balanced (recommended)
-  #   - 0.25: Conservative (only very uniform nuclei affected)
-  #
-  # Recommendation: Start with 0.20, increase if too many real foci filtered out
+  # Minimum CV (coefficient of variation) for "textured" nucleus
+  # CV = std / mean (range 0.0 - 1.0)
+  # Nuclei below threshold get stricter filtering
   min_cv_threshold: 0.20
   
   # Contrast multiplier for uniform nuclei (>= 1.0)
-  # When a nucleus is flagged as uniform, multiply its contrast threshold by this factor
-  #
-  # Example: If contrast_threshold = 2.5 and multiplier = 1.5:
-  #   - Textured nucleus: foci must be 2.5× brighter than background
-  #   - Uniform nucleus: foci must be 3.75× brighter (2.5 × 1.5)
-  #
-  # Values:
-  #   - 1.0: No additional filtering (texture detection disabled in practice)
-  #   - 1.5: Moderate additional stringency (recommended)
-  #   - 2.0: Aggressive filtering
-  #
-  # Increase if you still see false positives in uniform nuclei
-  uniform_contrast_multiplier: 1
+  # Example: contrast_threshold × multiplier = adjusted threshold
+  # Higher = more aggressive filtering of uniform nuclei
+  uniform_contrast_multiplier: 1.0
 
 
 # ===============================================================
 # PROCESSING CONTROL
 # ===============================================================
-# Settings for parallel processing and batch management.
-# ===============================================================
 processing:
-  # Number of parallel worker processes (null = auto-detect)
-  # Each worker processes one nucleus at a time
-  #
-  # Auto-detect behavior: Uses (CPU_cores - 1) up to maximum of 8
-  # Example: 16-core CPU → uses 8 workers
-  #
-  # Manual values:
-  #   - 1:     No parallelization (slow, easier to debug)
-  #   - 4-8:   Balanced for most systems
-  #   - 16+:   High-end workstations only
-  #
-  # WARNING: More workers = more RAM usage
-  # If you get memory errors, reduce this value
-  #
-  # Recommendation: Leave as null unless memory issues occur
+  # Number of parallel workers (null = auto: CPU_cores - 1, max 8)
+  # Reduce if memory errors occur
   max_workers: null
   
-  # ============================================================
-  # IMAGE PROCESSING LIMITS
-  # ============================================================
-  # Control how many images to process in a single run.
-  # Useful for testing, incremental processing, or memory management.
-  # ============================================================
+  # Maximum images to process (null = all images)
+  # Useful for testing or incremental processing
+  max_images: null
   
-  # Maximum number of images to process (null = process all)
-  # Useful for:
-  #   - Testing: Process 3-5 images to verify settings before full run
-  #   - Incremental: Process in batches of 10-20 to monitor progress
-  #   - Memory: Limit if processing very large images
+  # Resume from image N (0 = start from beginning)
+  # CRITICAL: Keep random_seed constant across resume runs
   #
-  # Example workflows:
-  #   Test run:       max_images: 3
-  #   Batch of 20:    max_images: 20
-  #   Process all:    max_images: null
-  max_images: 3
-  
-  # Resume processing from image N (0 = start from beginning)
-  # Allows continuing an interrupted run or processing in batches
-  #
-  # HOW RESUME WORKS:
-  # -----------------
-  # The pipeline processes images in a fixed order (determined by random_seed).
-  # Setting resume_from_image skips the first N images.
-  #
-  # EXAMPLE: Process 100 images in batches of 20
-  #   Run 1: resume_from_image: 0,  max_images: 20  → processes images 1-20
-  #   Run 2: resume_from_image: 20, max_images: 20  → processes images 21-40
-  #   Run 3: resume_from_image: 40, max_images: 20  → processes images 41-60
-  #   ...
-  #
-  # CRITICAL: Keep random_seed CONSTANT across resume runs!
-  # If you change the seed, the image order changes and you'll process wrong images.
-  #
-  # CSV HANDLING:
-  # -------------
-  # When resume_from_image > 0:
-  #   - Data is APPENDED to existing CSV files (no overwrite prompt)
-  #   - First run creates CSV with headers
-  #   - Subsequent runs add rows without re-writing headers
-  #
-  # When resume_from_image = 0:
-  #   - Prompts if CSV files exist (overwrite/rename/abort)
-  #   - Safe for starting fresh
+  # CSV behavior:
+  #   resume_from_image > 0: Data appended to existing CSVs
+  #   resume_from_image = 0: Prompts if CSVs exist (overwrite/rename/abort)
   resume_from_image: 0
 
 
 # ===============================================================
 # END OF CONFIGURATION
 # ===============================================================
-# After modifying this file, save it and run the main pipeline script.
-# The program will validate all settings and report any errors.
+# Quick Start:
+#   1. Set data.folder_path
+#   2. Verify parameter spaces exist or set generate_new: true
+#   3. Choose watershed mode
+#   4. Configure adaptive_parameters.enabled
+#   5. Set random_seed for reproducibility
+#   6. Run pipeline
 #
-# QUICK START CHECKLIST:
-# ----------------------
-# ☐ 1. Set data.folder_path to your image directory
-# ☐ 2. Verify parameter spaces exist (or set generate_new: true)
-# ☐ 3. Choose watershed mode (interactive vs preset)
-# ☐ 4. Configure adaptive parameters (or disable with enabled: false)
-# ☐ 5. Set visualization mode (none recommended for production)
-# ☐ 6. Set random_seed for reproducibility
-# ☐ 7. Run pipeline!
-#
-# COMMON MODIFICATIONS:
-# ---------------------
-# Testing new dataset:
-#   - max_images: 3
-#   - visualization.mode: "all"
-#   - adaptive_parameters.enabled: false
-#
-# Production run:
-#   - max_images: null
-#   - visualization.mode: "none"
-#   - adaptive_parameters.enabled: true
-#
-# Resume interrupted run:
-#   - resume_from_image: <number of completed images>
-#   - random_seed: <SAME as previous run>
+# See README.md for detailed documentation and SOP for step-by-step guide.
 # ===============================================================
