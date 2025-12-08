@@ -137,7 +137,7 @@ parameter_space:
   # Technical note: Uses farthest-point sampling to select diverse, well-spaced
   # combinations from the valid parameter space
   #
-  # Typical values:
+  # Typical values(needs testing):
   #   - 64:  Fast, good for testing
   #   - 256: Balanced (recommended)
   #   - 512: Very thorough, slower
@@ -187,6 +187,8 @@ parameter_space:
 # After running calibration once, you can save the optimized parameters
 # and load them directly for future runs (skips calibration phase).
 # This is useful for:
+#   - Continueing a data analysis
+#   Needs Testing if it works:
 #   - Large datasets where you don't want to recalibrate every time
 #   - Ensuring exact same parameters across multiple processing runs
 #   - Batch processing where first few images are representative
@@ -194,7 +196,7 @@ parameter_space:
 adaptive_parameters:
   # Enable adaptive parameter selection?
   # - true:  Use calibration → production workflow
-  # - false: Use all n_samples parameters on every image (slower but thorough)
+  # - false: Use all n_samples parameters on every image (slower, but better data)
   enabled: true
   
   # Number of images to use for calibration phase
@@ -211,13 +213,15 @@ adaptive_parameters:
   # Number of parameters to test DURING calibration
   # This is usually the same as parameter_space.n_samples
   #
-  # Technical note: More parameters = better optimization but slower calibration
+  # Note: if n_calibration_params < n_samples: The parameter iterations are selected in order of how they were created with farthest point 
+  # sampling, meaning that they will be naturally spread out, but not optimally.
+  # n_calibration_params > n_samples = ERROR
   n_calibration_params: 256
   
   # Number of parameters to use in PRODUCTION (after calibration)
   # These are the "best" parameters selected from calibration results
   #
-  # Recommendations:
+  # Recommendations(needs testing):
   #   - 1:  Fastest, use if calibration shows very consistent optimal parameter
   #   - 2:  Balanced, provides redundancy
   #   - 3:  Most robust, covers slight variations (recommended)
@@ -227,6 +231,8 @@ adaptive_parameters:
   #   1. Give counts closest to mean across all calibration nuclei
   #   2. Have low variance (consistent results)
   #   3. Are spatially diverse in parameter space (cover different detection strategies)
+  #
+  # Note: More params = bigger diversity, the program will automatically increase the diversity with more parameters selected
   n_production_params: 1
   
   # Where to save calibration results (for inspection/debugging)
