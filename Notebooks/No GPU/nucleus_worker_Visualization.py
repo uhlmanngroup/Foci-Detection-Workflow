@@ -52,7 +52,6 @@ from PIL import Image
 
 
 
-
 # ===============================================================
 # SAVE GLOBAL VISUALIZATION (INCLUDES REAL WATERSHED)
 # ===============================================================
@@ -61,7 +60,7 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
                                watershed_labels_tritc, watershed_labels_fitc,
                                well_number, position_number, base_name, output_root):
     """
-    Generate 4 full-field visualizations with proper filenames.
+    Generate 4 full-field visualizations(2 each for FITC and TRITC) with proper filenames.
     Watershed images show filled colored regions (no borders).
     
     This function creates comprehensive visualizations of the entire microscopy field:
@@ -167,7 +166,6 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
         plt.title(f"TRITC Foci | Well {well_number} Position {position_number}", fontsize=14)
         
         # Remove axis labels and ticks for cleaner image (no pixel coordinates shown)
-        # This creates a publication-ready image without distracting axis elements
         plt.axis('off')
         
         # Adjust layout to minimize white space around the image
@@ -193,7 +191,6 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
         # ================================================================
         # Creates an image showing all detected FITC foci as green dots
         # Same logic as TRITC but with green color ('go') for FITC channel
-        # Green chosen to match standard microscopy color conventions
         
         plt.figure(figsize=(10, 10))
         plt.imshow(vis_img, cmap='gray')
@@ -239,7 +236,7 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
             
             # Set random seed for reproducibility across runs
             # Same seed = same color palette every time you run the script
-            # Seed 42 chosen arbitrarily (common convention in data science)
+            # Seed 42 chosen arbitrarily
             np.random.seed(42)
             
             # Generate random RGB colors for each label
@@ -294,7 +291,6 @@ def save_global_visualizations(original_image, foci_tritc, foci_fitc,
         if num_labels_fitc > 0:
             # Generate random colors for FITC watershed regions
             # Different seed (43 vs 42) ensures FITC colors differ from TRITC
-            # This is important if someone looks at both images side-by-side
             np.random.seed(43)
             colors = np.random.rand(num_labels_fitc + 1, 3)
             colors[0] = [0, 0, 0]  # Background is black
