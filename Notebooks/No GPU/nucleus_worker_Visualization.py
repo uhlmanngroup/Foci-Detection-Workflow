@@ -666,13 +666,6 @@ def compute_adaptive_background_texture_nucleus_fallback(
     coord_nucleus_ids = np.zeros(N, dtype=int)
     
 
-#///////////////////////////////////////////////////////////////////////////////////////////////////////
-#///////////////////////////////////////////////////////////////////////////////////////////////////////
-#-----------HERE------------
-#///////////////////////////////////////////////////////////////////////////////////////////////////////
-#///////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
 
     # Loop through each candidate focus coordinate
     for i, (y, x) in enumerate(coords):
@@ -818,12 +811,13 @@ def filter_foci_by_texture(foci_coords, nucleus_labels, texture_info,
                           min_cv_for_foci=0.15):
     """
     Filter detected foci based on nucleus texture characteristics.
-    
-    RATIONALE: Uniformly bright nuclei (low CV) often produce false negative foci
-    because they will be filtered out with the background comparison(background being unusually bright).
-        
-    This function allows post-hoc cleanup based on texture metrics computed
-    during background estimation.
+
+    RATIONALE: Uniformly bright nuclei (low CV) often produce false POSITIVE foci
+    because any small intensity variation looks like a 'peak' against the flat
+    background, when it's actually just noise.
+
+    This function removes foci from nuclei with suspiciously low texture variation,
+    reducing false positives while keeping foci from genuinely spotty nuclei.
     
     Parameters:
     -----------
@@ -1153,6 +1147,14 @@ def apply_foci_filters(p_idx, bright_pcts, contrast_threshs, percentile_vals,
     # Return both the coordinates and the count
     # Count is redundant (could compute len(confirmed_coords)) but convenient for caller
     return confirmed_coords, len(confirmed_coords)
+
+
+#///////////////////////////////////////////////////////////////////////////////////////////////////////
+#///////////////////////////////////////////////////////////////////////////////////////////////////////
+#-----------HERE------------
+#///////////////////////////////////////////////////////////////////////////////////////////////////////
+#///////////////////////////////////////////////////////////////////////////////////////////////////////
+
 
 # ===============================================================
 # INTENSITY ANALYSIS
