@@ -1148,14 +1148,6 @@ def apply_foci_filters(p_idx, bright_pcts, contrast_threshs, percentile_vals,
     # Count is redundant (could compute len(confirmed_coords)) but convenient for caller
     return confirmed_coords, len(confirmed_coords)
 
-
-#///////////////////////////////////////////////////////////////////////////////////////////////////////
-#///////////////////////////////////////////////////////////////////////////////////////////////////////
-#-----------HERE------------
-#///////////////////////////////////////////////////////////////////////////////////////////////////////
-#///////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
 # ===============================================================
 # INTENSITY ANALYSIS
 # ===============================================================
@@ -1231,7 +1223,7 @@ def analyze_channel_intensity(nucleus_mask, image, channel_name):
 
 
 # ===============================================================
-# FOCI DETECTION FOR ONE CHANNEL - FIXED VERSION
+# FOCI DETECTION FOR ONE CHANNEL
 # ===============================================================
 # KEY FIX: Texture CV is now calculated BEFORE foci detection
 # This allows distinguishing between:
@@ -1253,9 +1245,7 @@ def detect_foci_single_channel(
     """
     Detect foci in a single nucleus region for one channel.
     Returns: (foci_list, summary_dict, watershed_labels)
-    
-    ✅ FIXED: Texture CV calculated FIRST, independent of foci detection
-    
+        
     This is the core foci detection function that:
     1. Calculates nucleus texture (CV) before any detection
     2. Applies DoG filtering to enhance foci
@@ -1415,6 +1405,27 @@ def detect_foci_single_channel(
         return return_empty("No signal in isolated nucleus", nucleus_cv_val=0.0)
 
     
+
+
+
+
+#///////////////////////////////////////////////////////////////////////////////////////////////////////
+#///////////////////////////////////////////////////////////////////////////////////////////////////////
+#-----------HERE------------
+#///////////////////////////////////////////////////////////////////////////////////////////////////////
+#///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+
+
+
+
+
+
     # ============================================================
     # ✅ NEW STEP 2: CALCULATE TEXTURE FIRST (BEFORE foci detection!)
     # ============================================================
