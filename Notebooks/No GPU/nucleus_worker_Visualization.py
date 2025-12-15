@@ -752,11 +752,11 @@ def compute_adaptive_background_texture_nucleus_fallback(
             local_percentiles = np.percentile(annulus_pixels, unique_percentiles)
             
             # ------------------------------------------------
-            # Density check (only for non-edge regions)
+            # Density check
             # ------------------------------------------------
             # Dense regions have many nearby foci → annulus samples other foci
             # In this case, nucleus background is more appropriate
-            if not is_near_edge and nuc_id > 0 and nuc_id in nucleus_stats:
+            if nuc_id > 0 and nuc_id in nucleus_stats:
                 # Compare local median to nucleus median
                 local_median = np.median(annulus_pixels)
                 nucleus_median = nucleus_stats[nuc_id]['median']
@@ -766,16 +766,14 @@ def compute_adaptive_background_texture_nucleus_fallback(
                 is_dense = local_median > nucleus_median * (1 + density_threshold)
                 
                 if is_dense:
-                    # Dense region detected: use NUCLEUS background
-                    # This is the key innovation - not global, but per-nucleus
+                    # Dense region detected: use NUCLEUS background (not global)
                     backgrounds[i, :] = nucleus_backgrounds[nuc_id]
                 else:
                     # Normal region: use LOCAL annulus background
                     # This is the standard case for well-separated foci
                     backgrounds[i, :] = local_percentiles
             else:
-                # Edge region or no nucleus info: use local annulus background
-                # Edge regions can't be checked for density (annulus may be outside)
+                # No nucleus info: use local annulus background
                 backgrounds[i, :] = local_percentiles
         else:
             # ------------------------------------------------
@@ -786,9 +784,11 @@ def compute_adaptive_background_texture_nucleus_fallback(
             if nuc_id > 0 and nuc_id in nucleus_backgrounds:
                 backgrounds[i, :] = nucleus_backgrounds[nuc_id]
             else:
-                # Last resort: use intensity at focus coordinate itself
-                # This shouldn't happen often but prevents crashes
-                backgrounds[i, :] = image[y, x]
+                # Last resort: use global image background
+                # Compute from all positive pixels in the image
+                # This is more reliable than the focus intensity itself
+                global_bg = np.percentile(image[image > 0], unique_percentiles)
+                backgrounds[i, :] = global_bg
     
     # ================================================================
     # RETURN RESULTS
@@ -819,13 +819,9 @@ def filter_foci_by_texture(foci_coords, nucleus_labels, texture_info,
     """
     Filter detected foci based on nucleus texture characteristics.
     
-    Use this AFTER foci detection to remove likely false positives from
-    uniformly bright nuclei.
-    
-    RATIONALE: Uniformly bright nuclei (low CV) often produce false positive foci
-    because any small intensity variation looks like a "peak" against the flat background.
-    Real foci are usually in nuclei with some texture variation (moderate to high CV).
-    
+    RATIONALE: Uniformly bright nuclei (low CV) often produce false negative foci
+    because they will be filtered out with the background comparison(background being unusually bright).
+        
     This function allows post-hoc cleanup based on texture metrics computed
     during background estimation.
     
