@@ -1404,27 +1404,6 @@ def detect_foci_single_channel(
     if isolated_img.max() == 0:
         return return_empty("No signal in isolated nucleus", nucleus_cv_val=0.0)
 
-    
-
-
-
-
-#///////////////////////////////////////////////////////////////////////////////////////////////////////
-#///////////////////////////////////////////////////////////////////////////////////////////////////////
-#-----------HERE------------
-#///////////////////////////////////////////////////////////////////////////////////////////////////////
-#///////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-
-
-
-
-
-
-
-
-
 
     # ============================================================
     # ✅ NEW STEP 2: CALCULATE TEXTURE FIRST (BEFORE foci detection!)
@@ -1436,9 +1415,7 @@ def detect_foci_single_channel(
     # Previously, texture was only calculated IF foci were detected
     # → couldn't distinguish these cases
     # Now, texture calculated FIRST, independent of detection success
-    
-    t_texture_start = time.time()
-    
+        
     # Calculate texture on WHOLE NUCLEUS, independent of foci detection
     # Extract all pixels within nucleus mask
     nucleus_pixels = isolated_img[nucleus_mask]
@@ -1461,12 +1438,6 @@ def detect_foci_single_channel(
     nucleus_is_uniform = nucleus_cv < min_cv_threshold
     nucleus_is_spotty = nucleus_cv > 0.25  # Above this = spotty (good for foci)
     
-    # Create human-readable label for logging
-    texture_label = 'uniform' if nucleus_is_uniform else ('spotty' if nucleus_is_spotty else 'moderate')
-    
-    # Print texture classification (helps track what's happening)
-    print(f"      Cell {cell_id} ({channel_name}): Texture CV={nucleus_cv:.3f} ({texture_label})")
-    
     
     # ============================================================
     # STEP 3: Apply DoG filter
@@ -1474,7 +1445,6 @@ def detect_foci_single_channel(
     # Difference of Gaussians enhances foci by subtracting smoothed versions
     # This acts as a band-pass filter highlighting features of specific size
     
-    t1 = time.time()
     
     # Apply DoG with low_sigma=1, high_sigma=2
     # This highlights features ~1-2 pixels in size (typical focus size)
@@ -1497,9 +1467,7 @@ def detect_foci_single_channel(
     # ============================================================
     # Find local maxima in both filtered and unfiltered images
     # Candidates must appear in both to be considered real
-    
-    t2 = time.time()
-    
+        
     # Extract parameters from valid_param_samples array
     # Each row is [bright_pct, contrast_thresh, percentile_val]
     bright_pcts = valid_param_samples[:, 0]      # Column 0: brightness percentile
@@ -1613,6 +1581,8 @@ def detect_foci_single_channel(
     # STEP 7: Apply contrast adjustments for uniform nuclei
     # ============================================================
     # Uniform nuclei get stricter filtering to reduce false positives
+    # This is not changing anything right now, because the muliplier is hard coded at 1
+    # due to time constraints and a lack of testing time to implement it well.
     
     contrast_multiplier = 1.0  # Default: no adjustment
     
@@ -1632,7 +1602,7 @@ def detect_foci_single_channel(
     # Shape: (num_unfiltered_candidates, num_filtered_candidates)
     distances = cdist(unf_yx, filt_yx)
     
-    # Tolerance for spatial matching (2 pixels)
+    # Tolerance for spatial matching between the filtered and unfiltered picture (2 pixels)
     tolerance = 2
     
     # Initialize accumulators
@@ -1720,6 +1690,7 @@ def detect_foci_single_channel(
         detection_prob = (count / total_iterations) * 100
         
         # Include if probability exceeds threshold
+        # Right now set at 0 so all foci are included
         if detection_prob >= watershed_min_detection_prob:
             watershed_foci.append(coord)
     
@@ -1744,7 +1715,7 @@ def detect_foci_single_channel(
     # Crop to bounding box around foci (for efficiency)
     # No need to process entire image when foci are localized
     y_coords, x_coords = final_coords[:, 0], final_coords[:, 1]
-    pad = 25  # Extra padding around foci
+    pad = 25  # Extra padding around foci max/min coordinates
     y_min = max(0, y_coords.min() - pad)
     y_max = min(filtered_img.shape[0], y_coords.max() + pad)
     x_min = max(0, x_coords.min() - pad)
@@ -1759,7 +1730,8 @@ def detect_foci_single_channel(
     # Subtract offset so coordinates are relative to crop
     final_coords_crop = final_coords - np.array([y_min, x_min])
     
-    # Erode nucleus mask to avoid edge artifacts
+    # Erode nucleus mask to avoid edge artifacts 
+    # Could maybe be removed if testing show no artifacts anymore
     # disk(2) removes 2-pixel border from nucleus
     nucleus_mask_eroded = binary_erosion(nucleus_mask_crop, disk(2))
     
@@ -1787,6 +1759,29 @@ def detect_foci_single_channel(
     dilated_markers = binary_dilation(marker_mask, structure=disk(1))
     binary_mask = binary_mask | dilated_markers
     
+    
+
+
+
+
+#///////////////////////////////////////////////////////////////////////////////////////////////////////
+#///////////////////////////////////////////////////////////////////////////////////////////////////////
+#-----------HERE------------
+#///////////////////////////////////////////////////////////////////////////////////////////////////////
+#///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+
+
+
+
+
+
+
     # --------------------------------------------------------
     # Run watershed
     # --------------------------------------------------------
