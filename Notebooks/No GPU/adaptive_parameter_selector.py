@@ -27,12 +27,12 @@ from typing import Tuple
 class AdaptiveParameterSelector:
     """
     Learns optimal parameter combinations from initial images,
-    then selects best 1-3 combinations for production use.
+    then selects best 1-X combinations for production use.
     
     The adaptive selection process:
     1. Calibration: Run full parameter sweep (256 combinations) on first N images
     2. Analysis: Identify which parameters give most consistent, reliable results
-    3. Selection: Pick 1-3 best parameters balancing performance and diversity
+    3. Selection: Pick 1-X best parameters balancing performance and diversity
     4. Production: Use only these optimized parameters on remaining images
     
     This reduces computation time by ~100× while maintaining detection quality.
@@ -42,8 +42,8 @@ class AdaptiveParameterSelector:
     n_calibration_images : int
         How many images to use for calibration (typically 5-10)
     n_final_params : int
-        How many parameter combinations to use in production (1-3)
-        1 = fastest, 3 = most robust
+        How many parameter combinations to use in production (1-X)
+        1 = fastest, 3 = more robust, etc.
     calibration_results : list
         Accumulated results from calibration phase
     selected_params : dict
