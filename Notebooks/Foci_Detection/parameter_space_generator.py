@@ -13,7 +13,7 @@ through an interactive, ground-truth-based calibration process:
 The result is a validated parameter space that can be used to generate reliable
 parameter combinations for the main detection pipeline.
 
-This approach ensures parameters are grounded in real data rather than arbitrary guesses.
+This approach ensures parameters are individual and specialized for each data set.
 """
 
 import numpy as np
@@ -363,7 +363,7 @@ class ParameterSpaceGenerator:
         # Load initial picture if navigation is enabled
         # ----------------------------------------------------------------
         if picture_navigation_enabled:
-            # Load from file paths instead of using provided arrays
+            # Load from file paths instead of using provided arrays(not implemented)
             masks = np.load(mask_data_paths[current_picture_idx], allow_pickle=True)
             channel_image = imageio.imread(channel_data_paths[current_picture_idx])
         
