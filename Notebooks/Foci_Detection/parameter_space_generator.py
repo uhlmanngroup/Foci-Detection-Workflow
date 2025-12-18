@@ -724,19 +724,6 @@ class ParameterSpaceGenerator:
                     self._show_all_nuclei_overview(masks, channel_image, used_ids)
                     continue  # Back to top of input loop
                 
-
-
-
-#///////////////////////////////////////////////////////////////////////////////////////////////////////////
-#///////////////////////////////////////////////////////////////////////////////////////////////////////////
-#---------------HERE-------------------
-#///////////////////////////////////////////////////////////////////////////////////////////////////////////
-#///////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-
-
-
                 # --------------------------------------------------------
                 # Try to parse as nucleus ID (integer)
                 # --------------------------------------------------------
@@ -1360,7 +1347,8 @@ class ParameterSpaceGenerator:
             
             print(f"      Nucleus CV: {nucleus_cv:.3f}")
             
-            # Apply multiplier for uniform nuclei (CV < 0.20) --> currently disabled(multiplier at 1x), but left code construction for future use
+            # Apply multiplier for uniform nuclei (CV < 0.20) 
+            #--> currently disabled(multiplier at 1x), but left code construction for future use
             if nucleus_cv < 0.20:
                 print(f"      ⚠️ Low texture - applying 1.0x contrast multiplier")
                 contrast_multiplier = 1.0
@@ -1465,6 +1453,13 @@ class ParameterSpaceGenerator:
             Returns None if no valid parameters found
             Also stored in self.valid_points
             
+
+#///////////////////////////////////////////////////////////////////////////////////////////////////////////
+#///////////////////////////////////////////////////////////////////////////////////////////////////////////
+#---------------HERE-------------------
+#///////////////////////////////////////////////////////////////////////////////////////////////////////////
+#///////////////////////////////////////////////////////////////////////////////////////////////////////////
+
         Raises:
         -------
         ValueError
