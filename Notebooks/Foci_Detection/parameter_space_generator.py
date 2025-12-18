@@ -946,7 +946,7 @@ class ParameterSpaceGenerator:
         Notes:
         ------
         - Uses IDENTICAL detection algorithm as main pipeline
-        - Detection is texture-aware (applies contrast multiplier if CV < 0.20)
+        - Detection is texture-aware (applies contrast multiplier if CV < 0.20) --> right now disabled(additional multiplier set at 1)
         - Each parameter combo is independent (parallelizable if needed)
         - Results are visualized as 3D scatter plots (green=correct, gray=incorrect)
         """
@@ -1360,10 +1360,10 @@ class ParameterSpaceGenerator:
             
             print(f"      Nucleus CV: {nucleus_cv:.3f}")
             
-            # Apply multiplier for uniform nuclei (CV < 0.20)
+            # Apply multiplier for uniform nuclei (CV < 0.20) --> currently disabled(multiplier at 1x), but left code construction for future use
             if nucleus_cv < 0.20:
-                print(f"      ⚠️ Low texture - applying 1.5x contrast multiplier")
-                contrast_multiplier = 1.5
+                print(f"      ⚠️ Low texture - applying 1.0x contrast multiplier")
+                contrast_multiplier = 1.0
                 # Scale up all contrast thresholds
                 contrast_grid_arr = contrast_grid_arr * contrast_multiplier
         
