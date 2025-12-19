@@ -19,7 +19,7 @@ data:
   # Required files per image position:
   #   *_TRITC_SEM.tif, *_FITC_SEM.tif, *_Cy5_SEM.tif
   #   *_DAPI_SEM.tif, *_DAPI_SEM_seg.npy
-  folder_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Test_Data_Andreas_hard"
+  folder_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Final_Test"
 
 
 # ===============================================================
@@ -33,7 +33,7 @@ parameter_space:
   # Generate new parameter spaces via interactive annotation?
   # true:  Manually annotate nuclei, generate new spaces
   # false: Load existing spaces from paths below
-  generate_new: false
+  generate_new: true
   
   # Paths to existing parameter space directories
   tritc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\TRITC_parameter_space"
@@ -65,7 +65,7 @@ adaptive_parameters:
   
   # Number of images for calibration phase
   # These images test all n_calibration_params to find optimal settings
-  n_calibration_images: 1
+  n_calibration_images: 2
   
   # Number of parameters to test during calibration
   # Usually same as parameter_space.n_samples
@@ -75,10 +75,10 @@ adaptive_parameters:
   # Number of optimized parameters to use in production
   # More parameters = higher diversity coverage
   # Algorithm auto-adjusts diversity weighting based on this value
-  n_production_params: 1
+  n_production_params: 3
   
   # Where to save calibration results for inspection
-  calibration_save_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\calibration_results.pkl"
+  calibration_save_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Final_Test\\Parameters\\calibration_results.pkl"
   
   # ============================================================
   # CALIBRATION CONTROL
@@ -104,8 +104,8 @@ adaptive_parameters:
   # Paths to saved optimal parameters (auto-generated after calibration)
   # Contains ONLY the final 1-3 best parameter combinations (not full calibration data)
   # Only used when load_reduced_parameters: true
-  reduced_tritc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\reduced_params_TRITC.pkl"
-  reduced_fitc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\reduced_params_FITC.pkl"
+  reduced_tritc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Final_Test\\Parameters\\Complete_KDE\\reduced_params_TRITC.pkl"
+  reduced_fitc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Final_Test\\Parameters\\Complete_KDE\\reduced_params_FITC.pkl"
   
   # ============================================================
   # RANDOM SEED
@@ -134,7 +134,7 @@ watershed:
   # Threshold selection mode
   # "manual_interactive": Analyze images, show histogram, get user input
   # "manual_preset":      Use fixed thresholds below
-  mode: "manual_preset"
+  mode: "manual_interactive"
   
   # Number of images to analyze in interactive mode
   # More images = better representation of dataset variability
@@ -161,7 +161,7 @@ visualization:
   # "all":      Every image (slow, large storage)
   # "none":     No visualizations (fastest)
   # "specific": Only images in lists below
-  mode: "none"
+  mode: "all"
   
   # Specific images by well/position (format: "WELL_POSITION")
   # Example: ["00029_00035", "00044_00021"]

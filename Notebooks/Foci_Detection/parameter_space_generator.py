@@ -672,7 +672,7 @@ class ParameterSpaceGenerator:
                         # Have at least one nucleus - can finish
                         print(f"\n✓ Finished with {selected_count} nuclei")
                         plt.close('all')
-                        return list(self.ground_truth_nuclei.keys())
+                        return list(self.ground_truth_nuclei.keys()), current_picture_idx
                     else:
                         # Must select at least one nucleus
                         print("❌ Please select at least one nucleus first!")
@@ -835,7 +835,7 @@ class ParameterSpaceGenerator:
                         # Check if we've reached target
                         if selected_count >= num_nuclei:
                             print(f"\n✅ Completed! Selected {selected_count} nuclei.")
-                            return list(self.ground_truth_nuclei.keys())
+                            return list(self.ground_truth_nuclei.keys()), current_picture_idx
                         
                         # Not done yet - prompt for next nucleus
                         print(f"✓ Saved! ({selected_count}/{num_nuclei} complete)")
@@ -851,7 +851,7 @@ class ParameterSpaceGenerator:
         # ================================================================
         # Reached target number of nuclei
         plt.close('all')
-        return list(self.ground_truth_nuclei.keys())
+        return list(self.ground_truth_nuclei.keys()), current_picture_idx
     
     def generate_grid_search(self, masks, channel_image, original_image):
         """
