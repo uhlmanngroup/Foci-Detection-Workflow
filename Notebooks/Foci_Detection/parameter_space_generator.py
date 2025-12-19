@@ -20,6 +20,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import Delaunay
 from sklearn.neighbors import KernelDensity
+from sklearn.model_selection import GridSearchCV
 import pandas as pd
 import pickle
 import os
@@ -1758,8 +1759,6 @@ class ParameterSpaceGenerator:
         # Too small: Overfitting (lumpy surface)
         # Too large: Oversmoothing (loses detail)
         
-        from sklearn.model_selection import GridSearchCV
-        
         if len(normalized_points) >= 20:
             # --------------------------------------------------------
             # Use cross-validation to find optimal bandwidth
@@ -2241,17 +2240,6 @@ class ParameterSpaceGenerator:
         # ================================================================
         plt.show()
     
-
-
-
-#/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#---------------HERE-------------------
-#/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-
     def _visualize_kde_and_delaunay(self):
         """
         Visualize KDE isosurface and Delaunay triangulation as 3D meshes.
@@ -2393,7 +2381,7 @@ class ParameterSpaceGenerator:
                 # SWAP columns before creating hull
                 # --------------------------------------------------------
                 # Original: [background, contrast, percentile]
-                # Display: [contrast, background, percentile]
+                # Display: [contrast, background, percentile] --> again to match the rest
                 iso_points_swapped = iso_points[:, [1, 0, 2]]
                 
                 # Create convex hull
@@ -3161,7 +3149,6 @@ class ParameterSpaceGenerator:
         - Boundaries shown very faintly (alpha=0.1)
         - Large figure (12×10) for visibility
         - Skips background (label 0)
-        - Handles empty nuclei gracefully
         """
         # ================================================================
         # SETUP
