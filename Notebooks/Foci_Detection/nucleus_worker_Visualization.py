@@ -1240,7 +1240,8 @@ def detect_foci_single_channel(
     calibration_tracker=None,
     image_id=None,
     min_cv_threshold=0.20,              
-    uniform_contrast_multiplier=1.0   
+    uniform_contrast_multiplier=1.0,
+    watershed_rescaling_mode='local'
 ):
     """
     Detect foci in a single nucleus region for one channel.
@@ -1710,7 +1711,48 @@ def detect_foci_single_channel(
     # --------------------------------------------------------
     # Rescale filtered image intensity to 0-100 range for consistent thresholding
     # This ensures water_threshold_percentile has consistent meaning
-    filtered_img = exposure.rescale_intensity(filtered_img, in_range='image', out_range=(0, 100))
+    if watershed_rescaling_mode == 'global':
+        # ====================================================
+        # GLOBAL RESCALING MODE
+        # ====================================================
+        # Use the FULL IMAGE intensity range for all nuclei
+        # This makes foci intensities comparable across nuclei
+        
+        # Get global min/max from the full original image (not isolated nucleus)
+        global_min = float(original_image.min())
+        global_max = float(original_image.max())
+        
+        # Rescale filtered image using global range
+        if global_max > global_min:
+            # Rescale to 0-100 using global intensity range
+            filtered_img_rescaled = ((filtered_img - global_min) / (global_max - global_min)) * 100
+            # Clip to ensure values stay in 0-100 range
+            filtered_img_rescaled = np.clip(filtered_img_rescaled, 0, 100)
+        else:
+            # Degenerate case: entire image is flat (shouldn't happen)
+            # Just use original values clipped to 0-100
+            filtered_img_rescaled = np.clip(filtered_img * 100, 0, 100)
+        
+        print(f"      Cell {cell_id} ({channel_name}): Global rescaling - "
+              f"range [{global_min:.6f}, {global_max:.6f}] → [0, 100]")
+    
+    else:  # watershed_rescaling_mode == 'local' (default)
+        # ====================================================
+        # LOCAL RESCALING MODE (ORIGINAL BEHAVIOR)
+        # ====================================================
+        # Rescale each nucleus independently to 0-100 range
+        # This maximizes sensitivity for each nucleus individually
+        # but makes cross-nucleus comparisons invalid
+        
+        # Use 'image' range to automatically find min/max of THIS nucleus
+        filtered_img_rescaled = exposure.rescale_intensity(
+            filtered_img, 
+            in_range='image',  # Auto-detect min/max from this nucleus
+            out_range=(0, 100)
+        )
+    
+    # Use the rescaled image for watershed (rest of code unchanged)
+    filtered_img = filtered_img_rescaled
     
     # Crop to bounding box around foci (for efficiency)
     # No need to process entire image when foci are localized
@@ -1983,7 +2025,8 @@ def process_single_nucleus(args):
      calibration_mode,
      tritc_tracker,
      fitc_tracker,
-     image_id
+     image_id,
+     watershed_rescaling_mode
     ) = args
     
     # ----------------------------------------------------------------
@@ -2112,7 +2155,8 @@ def process_single_nucleus(args):
                 calibration_tracker=tritc_tracker,      # Tracker for calibration data
                 image_id=image_id,                      # Image identifier
                 min_cv_threshold=min_cv_threshold,                      # cv threshold to decide if a nucleus is uniform
-                uniform_contrast_multiplier=uniform_contrast_multiplier  # adiddtional contrast threshold modifier for uniform nuclei
+                uniform_contrast_multiplier=uniform_contrast_multiplier,  # adiddtional contrast threshold modifier for uniform nuclei
+                watershed_rescaling_mode=watershed_rescaling_mode         # Local or global brightness rescaling
             )
 
             # ------------------------------------------------
@@ -2175,7 +2219,8 @@ def process_single_nucleus(args):
                 calibration_tracker=fitc_tracker,       # Tracker for calibration data
                 image_id=image_id,                      # Image identifier
                 min_cv_threshold=min_cv_threshold,                      # cv threshold to decide if a nucleus is uniform
-                uniform_contrast_multiplier=uniform_contrast_multiplier  # adiddtional contrast threshold modifier for uniform nuclei
+                uniform_contrast_multiplier=uniform_contrast_multiplier,  # adiddtional contrast threshold modifier for uniform nuclei
+                watershed_rescaling_mode=watershed_rescaling_mode         # Local or global brightness rescaling
             )
                     
             # ------------------------------------------------

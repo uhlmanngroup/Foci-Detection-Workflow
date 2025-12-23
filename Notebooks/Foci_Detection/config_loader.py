@@ -107,6 +107,11 @@ class Config:
     def GENERATE_NEW_PARAMETER_SPACE(self) -> bool:
         """Whether to generate new parameter spaces (true) or load existing (false)"""
         return self._config['parameter_space']['generate_new']
+
+    @property
+    def BASE_OUTPUT_PATH(self) -> str:
+        """Base directory for all parameter-related outputs"""
+        return self._config['parameter_space']['base_path']
     
     @property
     def TRITC_PARAMETER_SPACE_PATH(self) -> str:
@@ -209,6 +214,15 @@ class Config:
     def MANUAL_WATERSHED_THRESHOLD_FITC(self) -> float:
         """Pre-configured FITC watershed threshold (0-100 scale)"""
         return self._config['watershed']['manual_threshold_fitc']
+
+    @property
+    def WATERSHED_RESCALING_MODE(self) -> str:
+        """
+        Watershed rescaling mode ('local' or 'global').
+        
+        Returns 'local' if not specified (backward compatibility).
+        """
+        return self._config['watershed'].get('rescaling_mode', 'local')
     
     # --- Visualization ---
     # These control which images get visualization outputs
@@ -424,7 +438,8 @@ class Config:
             self.WATERSHED_MIN_DETECTION_PROB,
             self.MIN_CV_THRESHOLD,
             self.UNIFORM_CONTRAST_MULTIPLIER,
-            self.ENABLE_TEXTURE_FILTERING
+            self.ENABLE_TEXTURE_FILTERING,
+            self.WATERSHED_RESCALING_MODE
         )
     
     def to_dict(self) -> Dict[str, Any]:

@@ -34,8 +34,13 @@ parameter_space:
   # true:  Manually annotate nuclei, generate new spaces
   # false: Load existing spaces from paths below
   generate_new: true
+
+  # Base directory where NEW parameter spaces will be saved
+  # Only used when generate_new: true
+  base_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Final_Test\\Parameters\\Complete_KDE"
   
   # Paths to existing parameter space directories
+  # Only used when generate_new: false
   tritc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\TRITC_parameter_space"
   fitc_path: "Y:\\Group Members\\Valentin Aubry\\01_Data\\Parameters\\Complete_KDE\\FITC_parameter_space"
   
@@ -149,6 +154,14 @@ watershed:
   # Useful for batch processing with predetermined thresholds
   skip_interactive_config: false
 
+  # Rescaling mode for watershed segmentation
+  # "local":  Rescale each nucleus independently (0-100)
+  #           → Better sensitivity for dim nuclei
+  #           → Foci intensities NOT comparable across nuclei
+  # "global": Use image-wide intensity scale for all nuclei
+  #           → Enables cross-nucleus intensity comparisons
+  #           → Will reduce more dim foci in very dim nuclei to minimal size
+  rescaling_mode: "local"
 
 # ===============================================================
 # VISUALIZATION
