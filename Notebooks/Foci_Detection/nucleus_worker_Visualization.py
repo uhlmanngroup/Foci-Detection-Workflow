@@ -2022,11 +2022,11 @@ def process_single_nucleus(args):
      min_cv_threshold,
      uniform_contrast_multiplier,
      enable_texture_filtering,
+     watershed_rescaling_mode, 
      calibration_mode,
      tritc_tracker,
      fitc_tracker,
-     image_id,
-     watershed_rescaling_mode
+     image_id
     ) = args
     
     # ----------------------------------------------------------------

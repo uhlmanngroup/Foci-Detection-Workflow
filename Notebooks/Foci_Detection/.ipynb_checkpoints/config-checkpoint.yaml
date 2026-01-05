@@ -33,7 +33,7 @@ parameter_space:
   # Generate new parameter spaces via interactive annotation?
   # true:  Manually annotate nuclei, generate new spaces
   # false: Load existing spaces from paths below
-  generate_new: true
+  generate_new: false
 
   # Base directory where NEW parameter spaces will be saved
   # Only used when generate_new: true
@@ -103,7 +103,7 @@ adaptive_parameters:
   # Load pre-saved optimal parameters from previous calibration?
   # Completely skips calibration phase
   # Requires valid .pkl files at paths below
-  load_reduced_parameters: false
+  load_reduced_parameters: true
 
 
   # Paths to saved optimal parameters (auto-generated after calibration)
@@ -161,7 +161,7 @@ watershed:
   # "global": Use image-wide intensity scale for all nuclei
   #           → Enables cross-nucleus intensity comparisons
   #           → Will reduce more dim foci in very dim nuclei to minimal size
-  rescaling_mode: "local"
+  rescaling_mode: "global"
 
 # ===============================================================
 # VISUALIZATION
