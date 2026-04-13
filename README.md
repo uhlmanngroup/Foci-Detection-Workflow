@@ -1,6 +1,15 @@
 # Foci Detection Workflow
 
-TBA
+## Image Processing Pipeline - Step Summary
+### 1. Mask Creation (Cellpose_DAPI_Mask_Creation.ipynb)
+Flowchart:
+
+In this first step Cellpose-SAM creates masks for all the nuclei in a picture. For this the images from the DAPI channel are used. All the detected nuclei in the masks are numbered individually starting from 1 (0 would be the background).
+The program saves the resulting masks with the ending *_seg.npy into the same folder where the pictures are.
+Example mask created by Cellpose-SAM:
+
+Left: DAPI image, where all the detected nuclei are numbered (red).
+Right: Mask created by Cellpose-SAM from the DAPI picture on the left. 
 
 
 
