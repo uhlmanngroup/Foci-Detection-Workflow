@@ -11,6 +11,19 @@ Example mask created by Cellpose-SAM:
 Left: DAPI image, where all the detected nuclei are numbered (red).
 Right: Mask created by Cellpose-SAM from the DAPI picture on the left. 
 
+### 2. Mask Cleanup (Cellpose_DAPI_Mask_Cleanup.ipynb)
+Flowchart:
+
+This program consists of two steps: 
+1.	All the detected nuclei are checked to see if they touch the border of the picture and are then removed from the masks.
+Then the program shows a depiction of the remaining sizes of detected nuclei for all the pictures.
+2.	The user can then set a size threshold, the program then removes all the nuclei that are smaller than that threshold. This is useful to remove artefacts or other irregularities.
+At the end all the detected nuclei in the masks are renumbered so that there are no gaps in the numbering from the removed nuclei.
+
+In the end two masks are saved to the same folder that the masks originated from:
+*_seg.npy: The final masks after the end of step two. This overwrites the original masks from the mask creation program.
+*_seg_noborder.npy: The masks that were created after step one. With this file it is possible to re-do step two of this program and set a different threshold. 
+Example picture output:
 
 
 
