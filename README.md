@@ -32,9 +32,9 @@ Example picture output:
 Flowchart:
 
 To get results that are tailored to each data set, three key parameters go through an iteration process, where with the help of ground truth inputs from the user, a parameter space is created. These three parameters are:
-     - Foci brightness threshold – The minimal brightness that a focus has to have to be detected (as a percentile of the brightest pixel in the picture)
-     - Background brightness – The background brightness that the potential foci candidates are compared to (as a percentile of the brightest pixel in the picture)
-     - Contrast threshold – The multiplier by which the potential foci candidates have to be brighter than the background
+- Foci brightness threshold – The minimal brightness that a focus has to have to be detected (as a percentile of the brightest pixel in the picture)
+- Background brightness – The background brightness that the potential foci candidates are compared to (as a percentile of the brightest pixel in the picture)
+- Contrast threshold – The multiplier by which the potential foci candidates have to be brighter than the background
 This process takes place over 6 steps (All steps are identical for FITC and TRITC):
 1.	The user selects one to ten nuclei from one picture and adds a ground truth foci count/range. 
 2.	The program then iterates through the parameter values and marks all the combinations as valid that result in the foci ranges that correspond to the ground truth for each nucleus.
