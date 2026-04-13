@@ -26,7 +26,7 @@ In the end two masks are saved to the same folder that the masks originated from
 *_seg_noborder.npy: The masks that were created after step one. With this file it is possible to re-do step two of this program and set a different threshold. 
 
 Example picture output:\
-![](/Readme_pictures/Nuclei_Areas_example.png)\
+![](/Readme_pictures/Nuclei_Areas_example.png)
 ### 3. Foci detection (Foci_Detection_main.ipynb)
 #### 3.1 Parameter Space Generation (one-time setup per data set and channel)
 Flowchart:\
