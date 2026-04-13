@@ -3,7 +3,7 @@
 ## Image Processing Pipeline - Step Summary
 ### 1. Mask Creation (Cellpose_DAPI_Mask_Creation.ipynb)
 Flowchart:
-
+![/Readme_pictures/1.Mask_creation_Flowchart.png]
 In this first step Cellpose-SAM creates masks for all the nuclei in a picture. For this the images from the DAPI channel are used. All the detected nuclei in the masks are numbered individually starting from 1 (0 would be the background).
 The program saves the resulting masks with the ending *_seg.npy into the same folder where the pictures are.
 
@@ -113,6 +113,7 @@ After generating these 256 parameter combinations it is possible to reduce their
 A lower score is better, meaning that the parameter combinations that are close to the average detection result are best and having less variation is also better.\
 Example of two parameter combinations and their metrics after analyzing 4 nuclei with all having a global average of 8 foci detected. In this case parameter combination A is more reliable than B:
 
+With this score the first parameter combination is chosen.
 4.	If the parameter combinations are reduced to more than one, the formula for the score changes a bit to increase the diversity of the parameter combinations.
 
 With this the physical distance of the parameter combinations in the 3d grid is also factored in and because it is subtracted from the score points farther away are favored.
