@@ -65,7 +65,7 @@ In this next step the threshold for the watershed (decides area of detected nucl
 -	Input by the user after pixel brightness analysis
 Pixel brightness analysis: 
 Here all the pixels from all the nuclei (no background) in X pictures (amount can be set in the config.yaml) are rescaled to a scale from 0-100th percentile of the brightest pixel. This rescaling can be set to either local or global in the config.yaml.
- - Local rescaling
+     - Local rescaling
  All the nuclei will be individually rescaled, meaning that the brightest pixel in each nucleus will be set to the 100th percentile and the rest will be scaled in relation to that. In the end all the differently rescaled values from all the nuclei will be merged together.
   - Advantages:
   Dim nuclei will have better foci area detection.
