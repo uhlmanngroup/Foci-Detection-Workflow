@@ -110,8 +110,42 @@ After generating these 256 parameter combinations it is possible to reduce their
      - The deviation from the mean for each parameter combination
      - The coefficient of variation (cv)
 3.	From these metrics every parameter combination gets a score = 2*deviation + 1*cv\
-A lower score is better, meaning that the parameter combinations that are close to the average detection result are best and having less variation is also better. \\
+A lower score is better, meaning that the parameter combinations that are close to the average detection result are best and having less variation is also better.\
 Example of two parameter combinations and their metrics after analyzing 4 nuclei with all having a global average of 8 foci detected. In this case parameter combination A is more reliable than B:
+
+4.	If the parameter combinations are reduced to more than one, the formula for the score changes a bit to increase the diversity of the parameter combinations.
+
+With this the physical distance of the parameter combinations in the 3d grid is also factored in and because it is subtracted from the score points farther away are favored.
+
+The diversity weight is a hardcoded value that automatically adapts to the reduced number of parameter combinations and goes from 0.3 for 2 parameter combinations up to 0.6 for 4 or more parameter combinations.
+
+After selecting the reduced number of parameter combinations, they are then used for the rest of the images that are analyzed. They are also saved and can be loaded if the data analysis is resumed after a break.
+
+#### 3.5 Main Processing Loop (per image)
+Flowchart:
+
+The foci detection is split into two parts: The detection of the center of the foci and the area detection (watershed segmentation). For the foci detection all the nuclei are isolated and analyzed individually.
+
+Foci detection:
+-	First the texture of all the nuclei is analyzed. This is done by computing the coefficient of variation (CV) to describe how uneven the brightness is across a nucleus. This is done to better differentiate between uniform bright nuclei (few foci expected) and spotty bright nuclei (many foci expected). 
+This CV is only saved as a value right now, but there is the option in the code to apply a stricter contrast multiplier for uniformly bright nuclei (Hardcoded as an additional multiplier of 1.0).
+-	Then the difference of Gaussian filter is applied to each nucleus. This reduces the background noise. The next steps are done on both the filtered and the unfiltered pictures.
+
+Parameter combination iteration takes place here. The following steps are done with all the previously selected parameter combinations (Parameters: Foci brightness threshold, Background brightness, contrast threshold).
+-	Local maxima are detected with a minimal distance of 2 pixels between them and they have to be brighter than the Foci brightness threshold (one of the iterated parameters).
+-	For each of these local maxima a background area is chosen to compare it to. This area has the form of an annulus (Donut) with the local maximum in the hole in the middle. If the maximum is located in the middle of a nucleus the inner radius of the annulus is 2 pixels and the outer one is 6 pixels. If the maximum is located close to the border of a nucleus, the outer radius of the annulus grows to 12 pixels to ensure that the chosen background area is big enough (the parts of the annulus that would go outside the nucleus are cut off).
+-	From this annulus a brightness value that corresponds to the background brightness (one of the iterated parameters) is chosen.
+-	To get a pass in this step each detected local maximum has to be brighter than the background brightness value that was chosen from their corresponding annulus by a factor that is equal or higher than the contrast threshold (one of the iterated parameters).
+-	The location of the local maxima that passed the last step are now compared on the unfiltered picture and the one with a difference of Gaussian filter applied. To be confirmed as foci, they must exist on both pictures within a distance of 2 pixels.
+-	All the foci locations from different parameter combinations are accumulated for the next step, where their area is detected.
+
+Area detection (watershed segmentation):
+-	Here the watershed threshold that was set in an earlier step (3.2) is used for the distance transform to turn the picture into a binary black and white picture where all the foci are the centers of white spots on a black background. The size if the white spots depends on the watershed threshold. Only pixels that are brighter than the watershed threshold are part of the white spots.
+-	From this binary picture a watershed segmentation is done where all the detected foci are the seeds. This means that each focus expands its area until it either meets another focus, or the end of the white region surrounding it.
+
+From this foci detection process metrics are saved to two .csv files (step 3.7)
+
+
 
 
 
