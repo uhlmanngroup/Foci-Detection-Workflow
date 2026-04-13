@@ -57,7 +57,7 @@ Step 1, selected nucleus:
 Step 2, parameter iterations that are valid for one nucleus each:
 ![](/Readme_pictures/Parameter_Iterations_per_nucleus.png)
 Step 3, parameter iteration that is valid for all selected nuclei:
-![](/Readme_pictures/Parameter_Iteration_valid_intersection.png)
+![](/Readme_pictures/Parameter_Iteration_valid_intersection.png)\
 Steps 4-6, visualization of the KDE Isosurface and the Delaunay triangulation:
 ![](/Readme_pictures/Isosurface_Delaunay.png)
 #### 3.2 Watershed Threshold Configuration
