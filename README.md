@@ -145,7 +145,56 @@ Area detection (watershed segmentation):
 
 From this foci detection process metrics are saved to two .csv files (step 3.7)
 
+#### 3.6 Channel intensities
+Flowchart: 
 
+Additionally to the metrics from step 3.5 the channel intensities for all the channels is measured and saved into the same .csv files.
+
+#### 3.7 Data Collection
+To save all the data two .csv files are created, one to save all the data that pertains the foci themselves and one for the data pertaining the nuclei. 
+
+Foci data:
+-	Cell number, to identify which nucleus this focus belongs to
+-	Channel (FITC/TRITC)
+-	Well, Position, to identify the picture
+-	Focus center coordinates
+-	Focus area (pixels)
+-	Focus circularity, to measure the shape (0-1)
+-	Total focus intensity, sum of brightness
+-	Focus mean intensity, average brightness
+-	Detection probability, percentage of how many time a focus was detected over all parameter combinations
+
+Nuclei data:
+-	Cell number, to identify the nucleus
+-	Well, Position, to identify the picture
+-	DAPI area
+-	DAPI perimeter
+-	DAPI circularity
+-	Nucleus center coordinates
+-	Texture coefficient of variation (FITC and TRITC)
+-	If texture dependent filtering was applied (disabled at the moment)
+-	Mean foci intensity across all foci in the nucleus (FITC and TRITC)
+-	Minimum + maximum foci intensity (FITC and TRITC)
+-	Standard deviation across foci intensities (FITC and TRITC)
+-	Minimum + maximum of foci found by any parameter combination (FITC and TRITC)
+-	Mean number of detected foci (FITC and TRITC)
+-	Standard deviation of foci counts across all parameter combinations (FITC and TRITC)
+-	Total and mean intensity across the whole nucleus (DAPI, FITC, TRITC, Cy5)
+
+#### 3.8 Visualization (optional)
+In the config.yaml the option for saving all or specific pictures can be activated. This leads to the following pictures to be saved as .png (FITC and TRITC):
+
+Foci locations:
+-	DAPI picture as background
+-	All the detected foci locations marked as red dots (no foci area information)
+
+Example output:
+
+Watershed segmentation:
+-	DAPI picture as background
+-	Watershed result (foci areas) with individual colors
+
+Example output:
 
 
 
