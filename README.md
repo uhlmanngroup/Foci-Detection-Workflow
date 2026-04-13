@@ -35,12 +35,13 @@ To get results that are tailored to each data set, three key parameters go throu
 - Foci brightness threshold – The minimal brightness that a focus has to have to be detected (as a percentile of the brightest pixel in the picture)
 - Background brightness – The background brightness that the potential foci candidates are compared to (as a percentile of the brightest pixel in the picture)
 - Contrast threshold – The multiplier by which the potential foci candidates have to be brighter than the background
+
 This process takes place over 6 steps (All steps are identical for FITC and TRITC):
 1.	The user selects one to ten nuclei from one picture and adds a ground truth foci count/range. 
-2.	The program then iterates through the parameter values and marks all the combinations as valid that result in the foci ranges that correspond to the ground truth for each nucleus.
-Foci brightness threshold – Range 0-100th percentile, iteration in 31 steps
-Background brightness – Range 0-100th percentile, iteration in 31 steps
-Contrast threshold – Range from 1-10x multiplier, iteration in 15 steps
+2.	The program then iterates through the parameter values and marks all the combinations as valid that result in the foci ranges that correspond to the ground truth for each nucleus.\
+     - Foci brightness threshold – Range 0-100th percentile, iteration in 31 steps
+     - Background brightness – Range 0-100th percentile, iteration in 31 steps
+     - Contrast threshold – Range from 1-10x multiplier, iteration in 15 steps
 3.	Then all the valid parameter combinations are reduced by only keeping those that were valid for all the selected nuclei.
 4.	From these valid parameter combinations a 3d KDE (Kernel Density Estimation) Isosurface is created so that it contains 85% of the point density. This is done to exclude any outliers.
 5.	With the Isosurface as base a Delaunay triangulation is done to create a 3d body where all the points are connected to each other (also in the interior). With this body the program can determine if a point is inside or outside of it. This Delaunay triangulation is then saved together with its bounding box.
