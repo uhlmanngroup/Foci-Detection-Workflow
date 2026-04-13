@@ -1797,9 +1797,9 @@ def detect_foci_single_channel(
 
     # Dilate marker regions slightly to ensure connectivity
     # This prevents markers from being isolated islands
-    marker_mask = markers_crop > 0
-    dilated_markers = binary_dilation(marker_mask, structure=disk(1))
-    binary_mask = binary_mask | dilated_markers
+    #marker_mask = markers_crop > 0
+    #dilated_markers = binary_dilation(marker_mask, structure=disk(1))
+    #binary_mask = binary_mask | dilated_markers
     
     # --------------------------------------------------------
     # Run watershed
