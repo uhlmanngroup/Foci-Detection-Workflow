@@ -48,7 +48,42 @@ Contrast threshold – Range from 1-10x multiplier, iteration in 15 steps
 
 
 Picture output example:
+
 Step 1, nuclei overview with IDs:
+
+Step 1, selected nucleus:
+
+Step 2, parameter iterations that are valid for one nucleus each:
+
+Steps 4-6, visualization of the KDE Isosurface and the Delaunay triangulation:
+
+#### 3.2 Watershed Threshold Configuration
+Flowchart:
+
+In this next step the threshold for the watershed (decides area of detected nuclei) can be set via one of two options:
+-	Threshold values in the config.yaml
+-	Input by the user after pixel brightness analysis
+Pixel brightness analysis: 
+Here all the pixels from all the nuclei (no background) in X pictures (amount can be set in the config.yaml) are rescaled to a scale from 0-100th percentile of the brightest pixel. This rescaling can be set to either local or global in the config.yaml.
+o	Local rescaling
+All the nuclei will be individually rescaled, meaning that the brightest pixel in each nucleus will be set to the 100th percentile and the rest will be scaled in relation to that. In the end all the differently rescaled values from all the nuclei will be merged together.
+	Advantages:
+Dim nuclei will have better foci area detection.
+	Disadvantages:
+Foci areas aren’t comparable between different nuclei. The same focus will have a bigger detected area when being in a dim nucleus compared to being in a brighter one.
+o	Global rescaling
+Here all the nuclei will be rescaled together on the same scale. The brightest pixel in the whole picture is set to the 100th percentile and the rest will be scaled in relation to that. 
+	Advantages:
+Foci areas will be comparable between different nuclei. The same focus will have the same detected area no matter how bright the nucleus around it is.
+	Disadvantages:
+Dim nuclei with dim foci will have a less sensitive area detection.
+After the rescaling of the pixel brightness the user can set a threshold via input for FITC and TRITC.
+
+
+
+
+
+
 
 
 
