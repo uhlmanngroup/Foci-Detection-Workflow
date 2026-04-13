@@ -1,6 +1,6 @@
 # Foci Detection Workflow
 
-## Image Processing Pipeline - Step Summary
+## Image Processing Pipeline
 ### 1. Mask Creation (Cellpose_DAPI_Mask_Creation.ipynb)
 Flowchart:\
 ![](/Readme_pictures/1.Mask_creation_Flowchart.png)\
